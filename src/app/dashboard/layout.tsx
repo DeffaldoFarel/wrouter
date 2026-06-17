@@ -16,6 +16,7 @@ import {
   Sun,
   Moon,
   HeartPulse,
+  History,
 } from "lucide-react";
 
 export default function DashboardLayout({
@@ -59,6 +60,7 @@ export default function DashboardLayout({
     { label: "Usage", href: "/dashboard/logs", icon: ScrollText },
     { label: "Health Check", href: "/dashboard/health", icon: HeartPulse },
     { label: "Settings", href: "/dashboard/settings", icon: Settings },
+    { label: "Changelog", href: "/dashboard/changelog", icon: History },
   ];
 
   function isActive(href: string) {

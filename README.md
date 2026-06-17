@@ -2,7 +2,7 @@
 2|
 3|> Unified AI routing layer — one API to rule all LLM providers.
 4|
-5|![Version](https://img.shields.io/badge/version-1.0.0-blue)
+5|![Version](https://img.shields.io/badge/version-1.1.0-blue)
 6|![License](https://img.shields.io/badge/license-MIT-green)
 7|![Status](https://img.shields.io/badge/status-beta-yellow)
 8|
@@ -12,13 +12,34 @@
 12|
 13|## ✨ Features
 14|
-15|- **Unified API** — Single OpenAI-compatible endpoint for all providers. Switch models without changing your application code.
-16|- **Multi-Provider Support** — Route requests across OpenAI, Anthropic, Google, and other LLM providers through one interface.
-17|- **Smart Combos** — Chain multiple providers into fallback sequences. If the primary provider fails, the next one picks up automatically.
-18|- **Admin Dashboard** — Full-featured web UI for managing providers, API keys, usage analytics, and request logs.
-19|- **Usage Analytics** — Track token consumption, request counts, latency, and costs across all providers and models.
-20|- **Token Saver** — Optimize token usage with intelligent caching and response compression strategies.
-21|- **Rate Limiting** — Per-key and per-provider rate limits to protect your budgets and stay within provider quotas.
+- **Unified API** — Single OpenAI-compatible endpoint for all providers. Switch models without changing your application code.
+- **Multi-Provider Support** — Route requests across OpenAI, Anthropic, Google, DeepSeek, OpenRouter, and other LLM providers through one interface.
+- **Smart Combos** — Chain multiple providers into fallback sequences. If the primary provider fails, the next one picks up automatically.
+- **Visual Canvas** — Drag-and-drop interface for designing routing combos and fallback chains with intuitive flow diagrams.
+- **OpenRouter Provider Sort** — Automatically route to the cheapest, fastest, or highest-throughput provider on OpenRouter.
+- **RTK (Response Token Keeper)** — Intelligent response caching and token compression to reduce costs without losing quality.
+- **Caveman Mode** — Aggressive response compression that strips filler words while preserving meaning, saving up to 40% tokens.
+- **Admin Dashboard** — Full-featured web UI for managing providers, API keys, usage analytics, and request logs.
+- **Usage Analytics** — Track token consumption, request counts, latency, and costs across all providers and models.
+- **SSRF Guard** — Built-in security layer that prevents Server-Side Request Forgery attacks on custom provider endpoints.
+- **In-App Changelog** — Track version history and feature updates directly from the dashboard.
+
+---
+
+## 🔌 Supported Providers
+
+WRouter supports any OpenAI-compatible API out of the box. Pre-configured providers include:
+
+| Provider | Type | Notes |
+|---|---|---|
+| **OpenAI** | API Key | GPT-4o, GPT-4.1, o-series, etc. |
+| **Anthropic** | API Key | Claude 4, Claude Sonnet, etc. |
+| **OpenRouter** | API Key | Access to 300+ models via single key |
+| **DeepSeek** | API Key | DeepSeek V4 Flash, V4 Pro |
+| **Google Gemini** | API Key | Gemini 3.5 Flash, 3.1 Pro, 2.5 series |
+| **Custom (OpenAI-compatible)** | API Key / Open | Any provider with OpenAI-compatible endpoint |
+
+> **Adding a new provider?** Just enter the base URL and API key in the dashboard — WRouter handles the rest.
 22|
 23|---
 24|
@@ -203,9 +224,10 @@
 203|
 204|## 🔒 Security
 205|
-206|WRouter is built with security as a first-class concern:
-207|
-208|- **Password Hashing** — All passwords hashed with bcrypt (configurable salt rounds)
+WRouter is built with security as a first-class concern:
+
+- **SSRF Guard** — Prevents Server-Side Request Forgery by validating and blocking internal/private IP addresses in provider URLs
+- **Password Hashing** — All passwords hashed with bcrypt (configurable salt rounds)
 209|- **Token Generation** — API keys generated using `crypto.randomBytes` for cryptographic strength
 210|- **Rate Limiting** — Configurable per-key and per-IP rate limits to prevent abuse
 211|- **Security Headers** — Helmet-style headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, etc.)
