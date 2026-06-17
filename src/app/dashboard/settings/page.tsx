@@ -15,6 +15,13 @@ import {
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
+const OPENROUTER_SORT_OPTIONS = [
+  { value: "", label: "Default (Load Balanced)" },
+  { value: "price", label: "Lowest Price" },
+  { value: "throughput", label: "Highest Throughput" },
+  { value: "latency", label: "Lowest Latency" },
+];
+
 export default function SettingsPage() {
   const router = useRouter();
   const [settings, setSettings] = useState<Record<string, string>>({});
@@ -194,6 +201,54 @@ export default function SettingsPage() {
               <span className="text-muted-foreground">Port</span>
               <span>{settings.port || "20128"}</span>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* OpenRouter Provider Routing */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">OpenRouter Provider Routing</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            OpenRouter routes requests to multiple underlying providers (e.g., DeepSeek, Anthropic, etc.) for each model. Control how providers are selected:
+          </p>
+          <div className="flex items-center gap-4">
+            <Label htmlFor="or-sort" className="shrink-0 text-sm">Sort Preference</Label>
+            <select
+              id="or-sort"
+              value={settings.openrouter_provider_sort || ""}
+              onChange={async (e) => {
+                const value = e.target.value;
+                try {
+                  const res = await fetch("/api/settings", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ openrouter_provider_sort: value }),
+                  });
+                  if (res.ok) {
+                    setSettings((s) => ({ ...s, openrouter_provider_sort: value }));
+                    toast.success(value ? `Provider sort set to: ${OPENROUTER_SORT_OPTIONS.find(o => o.value === value)?.label}` : "Provider sort reset to default (load balanced)");
+                  } else {
+                    toast.error("Failed to update setting");
+                  }
+                } catch {
+                  toast.error("Connection error");
+                }
+              }}
+              className="h-8 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {OPENROUTER_SORT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="rounded-md bg-muted px-4 py-3 text-xs text-muted-foreground space-y-1">
+            <p><strong>Default:</strong> OpenRouter load balances across stable providers, weighted by inverse price (cheaper providers get more traffic).</p>
+            <p><strong>Lowest Price:</strong> Always use the cheapest provider, no load balancing. Best for cost optimization.</p>
+            <p><strong>Highest Throughput:</strong> Prioritize fastest provider (tokens/sec). Best for bulk processing.</p>
+            <p><strong>Lowest Latency:</strong> Prioritize lowest response time. Best for real-time applications.</p>
           </div>
         </CardContent>
       </Card>

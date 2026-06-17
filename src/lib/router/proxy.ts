@@ -1,5 +1,8 @@
 import { RoutingResult, getFallbackChain, logRequest, incrementActiveJobs, decrementActiveJobs, notifyRequestStart } from "./engine";
 import logger from "@/lib/logger";
+import { db } from "@/lib/db";
+import { settings } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 interface ChatCompletionRequest {
   model: string;
@@ -11,7 +14,53 @@ interface ChatCompletionRequest {
   frequency_penalty?: number;
   presence_penalty?: number;
   stop?: string | string[];
+  provider?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+/**
+ * Check if a URL is an OpenRouter endpoint.
+ */
+function isOpenRouter(baseUrl: string): boolean {
+  return baseUrl.includes("openrouter.ai");
+}
+
+/**
+ * Get OpenRouter provider sort setting from DB.
+ * Returns "price" | "throughput" | "latency" | null
+ */
+function getOpenRouterSort(): string | null {
+  try {
+    const row = db.select().from(settings).where(eq(settings.key, "openrouter_provider_sort")).get();
+    return row?.value || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Inject OpenRouter provider preferences into the request body if applicable.
+ * Only modifies the body when:
+ *  1. Target is OpenRouter
+ *  2. Setting `openrouter_provider_sort` is configured
+ *  3. User hasn't already set their own `provider` field
+ */
+function injectOpenRouterProvider(
+  body: ChatCompletionRequest,
+  target: RoutingResult
+): ChatCompletionRequest {
+  if (!isOpenRouter(target.baseUrl)) return body;
+
+  const sort = getOpenRouterSort();
+  if (!sort) return body;
+
+  // Don't override if user already specified provider preferences
+  if (body.provider) return body;
+
+  return {
+    ...body,
+    provider: { sort },
+  };
 }
 
 interface ProxyResult {
@@ -137,9 +186,10 @@ async function forwardRequest(
 ): Promise<Response> {
   const url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-  // Build the forwarded body with the resolved model
+  // Build the forwarded body with the resolved model + OpenRouter provider injection
+  const injected = injectOpenRouterProvider(requestBody, target);
   const forwardBody = {
-    ...requestBody,
+    ...injected,
     model: target.model,
   };
 
@@ -185,8 +235,10 @@ export async function proxyStreamWithFallback(
 
       const url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
+      // Inject OpenRouter provider preferences + resolved model
+      const injected = injectOpenRouterProvider(requestBody, target);
       const forwardBody = {
-        ...requestBody,
+        ...injected,
         model: target.model,
         stream: true,
         // Request usage stats in the final SSE chunk (OpenAI-compatible providers)
