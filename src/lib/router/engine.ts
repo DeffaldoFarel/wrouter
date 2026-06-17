@@ -68,6 +68,14 @@ function notifySSE(event: Record<string, unknown>) {
   }
 }
 
+/**
+ * Notify SSE subscribers that a request is starting on a specific provider.
+ * This allows the UI to show real-time "active" indicators.
+ */
+export function notifyRequestStart(providerId: string, providerName: string, model: string) {
+  notifySSE({ type: "request-start", providerId, providerName, model });
+}
+
 export interface ComboModel {
   model: string;
   providerId: string;

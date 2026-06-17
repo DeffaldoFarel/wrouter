@@ -150,8 +150,8 @@ export async function GET(req: NextRequest) {
     return normalized || raw;
   };
 
-  // --- Active providers tracking (last 30 seconds) ---
-  const thirtySecondsAgo = new Date(now.getTime() - 30 * 1000).toISOString();
+  // --- Active providers tracking (last 5 seconds — client-side SSE tracking is primary) ---
+  const fiveSecondsAgo = new Date(now.getTime() - 5 * 1000).toISOString();
   const activeProviderIds = new Set<string>();
 
   // ═══════════════════════════════════════════════════════
@@ -197,8 +197,8 @@ export async function GET(req: NextRequest) {
     if (isError) pb.errors++;
     if (!pb.lastUsed || log.timestamp > pb.lastUsed!) pb.lastUsed = log.timestamp;
 
-    // ── Track active providers (last 30 seconds) ──
-    if (log.timestamp >= thirtySecondsAgo && log.providerId) {
+    // ── Track active providers (last 5 seconds — fallback for initial page load) ──
+    if (log.timestamp >= fiveSecondsAgo && log.providerId) {
       activeProviderIds.add(log.providerId);
     }
 

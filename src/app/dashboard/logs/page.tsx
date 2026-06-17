@@ -466,6 +466,10 @@ export default function UsagePage() {
   const sseRef = useRef<EventSource | null>(null);
   const { tickColor, gridColor, mutedFg, primaryColor, cardBg, cardFg, borderColor } = useChartColors();
 
+  // Client-side active provider tracking (real-time via SSE)
+  const [activeProviderIds, setActiveProviderIds] = useState<Set<string>>(new Set());
+  const activeTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
   const tooltipStyle = {
     backgroundColor: cardBg,
     border:          `1px solid ${borderColor}`,
@@ -529,7 +533,37 @@ export default function UsagePage() {
       es.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
+          if (msg.type === "request-start") {
+            // Mark provider as active immediately when a request starts
+            const pid = msg.providerId as string;
+            setActiveProviderIds((prev) => new Set(prev).add(pid));
+            // Safety timeout: auto-remove after 60s if no completion event arrives
+            const existing = activeTimeoutsRef.current.get(pid);
+            if (existing) clearTimeout(existing);
+            activeTimeoutsRef.current.set(pid, setTimeout(() => {
+              setActiveProviderIds((prev) => {
+                const next = new Set(prev);
+                next.delete(pid);
+                return next;
+              });
+              activeTimeoutsRef.current.delete(pid);
+            }, 60000));
+          }
           if (msg.type === "log") {
+            // Request completed — remove provider from active set
+            const logData = msg.data as LogEntry;
+            if (logData.providerId) {
+              setActiveProviderIds((prev) => {
+                const next = new Set(prev);
+                next.delete(logData.providerId!);
+                return next;
+              });
+              const timeout = activeTimeoutsRef.current.get(logData.providerId);
+              if (timeout) {
+                clearTimeout(timeout);
+                activeTimeoutsRef.current.delete(logData.providerId);
+              }
+            }
             setLogs((p) => [msg.data as LogEntry, ...p].slice(0, 50));
             setFilter((cur) => { fetchAll(cur); return cur; });
           }
@@ -550,6 +584,11 @@ export default function UsagePage() {
     return () => {
       clearTimeout(reconnectTimeout);
       es?.close();
+      // Clean up all active provider timeouts
+      for (const timeout of activeTimeoutsRef.current.values()) {
+        clearTimeout(timeout);
+      }
+      activeTimeoutsRef.current.clear();
     };
   }, []);
 
@@ -643,7 +682,7 @@ export default function UsagePage() {
             title="Connection Map"
             trailing={
               <>
-                <span className="font-medium text-foreground">{usage?.canvasProviders.filter((p) => p.active).length ?? 0}</span>
+                <span className="font-medium text-foreground">{activeProviderIds.size}</span>
                 {" active / "}
                 {usage?.canvasProviders.length ?? 0} providers
               </>
@@ -652,8 +691,11 @@ export default function UsagePage() {
           <CardContent className="p-0 flex-1 min-h-0">
             <div className="w-full h-full" style={{ minHeight: 380 }}>
               <ProviderCanvas
-                providers={usage?.canvasProviders ?? []}
-                activeJobs={usage?.activeJobs ?? 0}
+                providers={(usage?.canvasProviders ?? []).map((p) => ({
+                  ...p,
+                  active: activeProviderIds.has(p.id),
+                }))}
+                activeJobs={activeProviderIds.size > 0 ? activeProviderIds.size : (usage?.activeJobs ?? 0)}
               />
             </div>
           </CardContent>

@@ -62,7 +62,7 @@ function ProviderNode({
     <div
       className={`px-4 py-2.5 rounded-lg border text-sm font-medium shadow transition-all ${
         data.active
-          ? "border-green-500 bg-green-500/10 text-green-600 dark:text-green-400 shadow-green-500/20 shadow-md"
+          ? "border-green-500 bg-card text-green-700 dark:text-green-300 shadow-green-500/20 shadow-md"
           : data.enabled
           ? "border-border bg-card text-foreground"
           : "border-border bg-muted text-muted-foreground opacity-50"

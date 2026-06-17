@@ -1,4 +1,4 @@
-import { RoutingResult, getFallbackChain, logRequest, incrementActiveJobs, decrementActiveJobs } from "./engine";
+import { RoutingResult, getFallbackChain, logRequest, incrementActiveJobs, decrementActiveJobs, notifyRequestStart } from "./engine";
 import logger from "@/lib/logger";
 
 interface ChatCompletionRequest {
@@ -35,6 +35,9 @@ export async function proxyWithFallback(
   for (const target of fallbackChain) {
     const startTime = Date.now();
     try {
+      // Notify UI that a request is starting on this provider
+      notifyRequestStart(target.providerId, target.providerName, target.model);
+
       const response = await forwardRequest(requestBody, target);
       const latencyMs = Date.now() - startTime;
 
@@ -171,17 +174,23 @@ export async function proxyStreamWithFallback(
 ): Promise<{ stream: ReadableStream; providerId: string }> {
   let lastError: Error | null = null;
   incrementActiveJobs();
+  let handedOff = false;
 
   try {
   for (const target of fallbackChain) {
     const startTime = Date.now();
     try {
+      // Notify UI that a request is starting on this provider
+      notifyRequestStart(target.providerId, target.providerName, target.model);
+
       const url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
       const forwardBody = {
         ...requestBody,
         model: target.model,
         stream: true,
+        // Request usage stats in the final SSE chunk (OpenAI-compatible providers)
+        stream_options: { include_usage: true },
       };
 
       // Add timeout for initial connection (5 minutes for streaming)
@@ -239,7 +248,7 @@ export async function proxyStreamWithFallback(
       let tokensOut: number | undefined = undefined;
 
       const tappedStream = new ReadableStream({
-        async start(controller) {
+        async start(streamController) {
           const reader = originalStream.getReader();
           const decoder = new TextDecoder();
           try {
@@ -260,11 +269,11 @@ export async function proxyStreamWithFallback(
                   } catch { /* ignore */ }
                 }
               }
-              controller.enqueue(value);
+              streamController.enqueue(value);
             }
           } finally {
             reader.releaseLock();
-            controller.close();
+            streamController.close();
             // Log after stream completes - use total duration, not time-to-first-byte
             const totalDuration = Date.now() - startTime;
             logRequest({
@@ -285,10 +294,13 @@ export async function proxyStreamWithFallback(
               tokensOut,
               stream: true,
             }, "Stream request completed");
+            // Decrement active jobs only after the stream is fully consumed
+            decrementActiveJobs();
           }
         },
       });
 
+      handedOff = true;
       return { stream: tappedStream, providerId: target.providerId };
     } catch (err) {
       const latencyMs = Date.now() - startTime;
@@ -314,6 +326,10 @@ export async function proxyStreamWithFallback(
 
   throw lastError || new Error("No providers available for streaming");
   } finally {
-    decrementActiveJobs();
+    // Only decrement here if the stream was NOT handed off (i.e., all providers failed).
+    // When handed off, decrementActiveJobs runs inside the tappedStream's finally block.
+    if (!handedOff) {
+      decrementActiveJobs();
+    }
   }
 }
