@@ -1,0 +1,370 @@
+import { db } from "../db";
+import { providers, combos, requestLogs } from "../db/schema";
+import { eq, inArray } from "drizzle-orm";
+import { v4 as uuidv4 } from "uuid";
+
+// In-memory counter of active (in-flight) proxy jobs.
+// LIMITATION: This is per-process only. If the app runs in cluster/multi-process mode
+// (e.g., with PM2 cluster or multiple Node.js workers), each process has its own counter.
+// The displayed count will only reflect the process handling the current request.
+// For single-process deployments (default), this works correctly.
+let _activeJobs = 0;
+
+export function incrementActiveJobs() { _activeJobs++; }
+export function decrementActiveJobs() { if (_activeJobs > 0) _activeJobs--; }
+export function getActiveJobs() { return _activeJobs; }
+
+// Simple in-memory cache for providers (rarely change)
+const providerCache = {
+  data: null as typeof providers.$inferSelect[] | null,
+  timestamp: 0,
+  ttl: 5 * 60 * 1000, // 5 minutes
+};
+
+/**
+ * Get all providers with caching (5 min TTL).
+ * Reduces DB queries for frequently accessed provider data.
+ */
+function getAllProvidersCached(): typeof providers.$inferSelect[] {
+  const now = Date.now();
+  if (!providerCache.data || now - providerCache.timestamp > providerCache.ttl) {
+    providerCache.data = db.select().from(providers).all();
+    providerCache.timestamp = now;
+  }
+  return providerCache.data;
+}
+
+/**
+ * Invalidate provider cache (call after provider changes).
+ */
+export function invalidateProviderCache() {
+  providerCache.data = null;
+  providerCache.timestamp = 0;
+}
+
+/**
+ * Safely parse JSON with fallback to default value.
+ * Prevents app crash if database contains invalid JSON.
+ */
+function safeJsonParse<T>(json: string, fallback: T): T {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return fallback;
+  }
+}
+
+// Lazy import to avoid circular deps at module load time
+function notifySSE(event: Record<string, unknown>) {
+  try {
+    // Dynamic require so this doesn't break if the route isn't loaded yet
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { notifySubscribers } = require("../../app/api/events/route");
+    notifySubscribers(event);
+  } catch {
+    // SSE route not loaded yet or not available — silently ignore
+  }
+}
+
+export interface ComboModel {
+  model: string;
+  providerId: string;
+  priority: number;
+}
+
+export interface RoutingResult {
+  providerId: string;
+  providerName: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+/**
+ * Resolve a model request to a specific provider.
+ * 
+ * Model format:
+ * - "combo-slug" → use combo's first available model by priority
+ * - "combo-slug/model-name" → use specific model from combo with fallback
+ * - "prefix/model-name" → route directly to provider with that prefix
+ * - "model-name" → find first provider that has this model
+ */
+export function resolveModel(requestedModel: string): RoutingResult | null {
+  // Check if it's a prefixed request (contains slash)
+  if (requestedModel.includes("/")) {
+    // Only split on the FIRST slash — model names can contain slashes (e.g. openrouter/deepseek/deepseek-chat-v3)
+    const slashIdx  = requestedModel.indexOf("/");
+    const slug      = requestedModel.slice(0, slashIdx);
+    const modelName = requestedModel.slice(slashIdx + 1); // preserve remaining slashes in model name
+
+    // First check if it's a provider prefix
+    const providerByPrefix = db.select().from(providers)
+      .where(eq(providers.prefix, slug))
+      .get();
+
+    if (providerByPrefix && providerByPrefix.enabled) {
+      // Strict model validation: model must be in provider's registered list
+      const registeredModels: string[] = safeJsonParse<string[]>(providerByPrefix.models, []);
+      if (!registeredModels.includes(modelName)) {
+        return null; // Model not registered — reject before hitting upstream
+      }
+      return {
+        providerId: providerByPrefix.id,
+        providerName: providerByPrefix.name,
+        baseUrl: providerByPrefix.baseUrl,
+        apiKey: providerByPrefix.apiKey,
+        model: modelName,
+      };
+    }
+
+    // Then check if it's a combo slug
+    return resolveComboModel(slug, modelName);
+  }
+
+  // Check if the requested model matches a combo slug exactly
+  const combo = db.select().from(combos)
+    .where(eq(combos.slug, requestedModel))
+    .get();
+
+  if (combo && combo.enabled) {
+    return resolveComboFirstModel(combo);
+  }
+
+  // Direct model lookup — find first enabled provider with this model
+  return resolveDirectModel(requestedModel);
+}
+
+/**
+ * Resolve a model from a combo with fallback chain.
+ */
+function resolveComboModel(slug: string, modelName: string): RoutingResult | null {
+  const combo = db.select().from(combos)
+    .where(eq(combos.slug, slug))
+    .get();
+
+  if (!combo || !combo.enabled) return null;
+
+  const comboModels: ComboModel[] = safeJsonParse<ComboModel[]>(combo.models, []);
+
+  // Filter models that match the requested model name, sorted by priority
+  const matchingModels = comboModels
+    .filter((m) => m.model === modelName)
+    .sort((a, b) => a.priority - b.priority);
+
+  if (matchingModels.length === 0) return null;
+
+  // Batch fetch all providers in one query (fixes N+1 problem)
+  const providerIds = Array.from(new Set(matchingModels.map(m => m.providerId)));
+  const allProviders = db.select().from(providers)
+    .where(inArray(providers.id, providerIds))
+    .all();
+  const providerMap = new Map(allProviders.map(p => [p.id, p]));
+
+  // Try each model in priority order
+  for (const entry of matchingModels) {
+    const provider = providerMap.get(entry.providerId);
+
+    if (provider && provider.enabled) {
+      return {
+        providerId: provider.id,
+        providerName: provider.name,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: entry.model,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Use the first model in a combo (by priority) when no specific model is specified.
+ */
+function resolveComboFirstModel(combo: typeof combos.$inferSelect): RoutingResult | null {
+  const comboModels: ComboModel[] = safeJsonParse<ComboModel[]>(combo.models, []);
+  const sorted = comboModels.sort((a, b) => a.priority - b.priority);
+
+  if (sorted.length === 0) return null;
+
+  // Batch fetch all providers in one query (fixes N+1 problem)
+  const providerIds = Array.from(new Set(sorted.map(m => m.providerId)));
+  const allProviders = db.select().from(providers)
+    .where(inArray(providers.id, providerIds))
+    .all();
+  const providerMap = new Map(allProviders.map(p => [p.id, p]));
+
+  for (const entry of sorted) {
+    const provider = providerMap.get(entry.providerId);
+
+    if (provider && provider.enabled) {
+      return {
+        providerId: provider.id,
+        providerName: provider.name,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: entry.model,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find first enabled provider that has the requested model.
+ */
+function resolveDirectModel(modelName: string): RoutingResult | null {
+  const allProviders = getAllProvidersCached();
+
+  for (const provider of allProviders) {
+    if (!provider.enabled) continue;
+
+    const providerModels: string[] = safeJsonParse<string[]>(provider.models, []);
+    if (providerModels.includes(modelName)) {
+      return {
+        providerId: provider.id,
+        providerName: provider.name,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: modelName,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get fallback chain for a combo + model.
+ * Returns all matching providers in priority order.
+ */
+export function getFallbackChain(requestedModel: string): RoutingResult[] {
+  const results: RoutingResult[] = [];
+
+  if (requestedModel.includes("/")) {
+    const slashIdx  = requestedModel.indexOf("/");
+    const slug      = requestedModel.slice(0, slashIdx);
+    const modelName = requestedModel.slice(slashIdx + 1); // preserve slashes in model name
+
+    // First check if it's a provider prefix (no fallback, single result)
+    const providerByPrefix = db.select().from(providers)
+      .where(eq(providers.prefix, slug))
+      .get();
+
+    if (providerByPrefix && providerByPrefix.enabled) {
+      // Strict model validation — same as resolveModel()
+      const registeredModels: string[] = safeJsonParse<string[]>(providerByPrefix.models, []);
+      if (registeredModels.includes(modelName)) {
+        results.push({
+          providerId: providerByPrefix.id,
+          providerName: providerByPrefix.name,
+          baseUrl: providerByPrefix.baseUrl,
+          apiKey: providerByPrefix.apiKey,
+          model: modelName,
+        });
+      }
+      return results; // return even if empty — prefix matched, don't fall through to combo
+    }
+
+    // Then check combo
+    const combo = db.select().from(combos)
+      .where(eq(combos.slug, slug))
+      .get();
+
+    if (!combo || !combo.enabled) return results;
+
+    const comboModels: ComboModel[] = safeJsonParse<ComboModel[]>(combo.models, []);
+    const sorted = comboModels.sort((a, b) => a.priority - b.priority);
+
+    if (sorted.length === 0) return results;
+
+    // Batch fetch all providers in one query (fixes N+1 problem)
+    const providerIds = Array.from(new Set(sorted.map(m => m.providerId)));
+    const allProviders = db.select().from(providers)
+      .where(inArray(providers.id, providerIds))
+      .all();
+    const providerMap = new Map(allProviders.map(p => [p.id, p]));
+
+    for (const entry of sorted) {
+      const provider = providerMap.get(entry.providerId);
+
+      if (provider && provider.enabled) {
+        results.push({
+          providerId: provider.id,
+          providerName: provider.name,
+          baseUrl: provider.baseUrl,
+          apiKey: provider.apiKey,
+          model: entry.model,
+        });
+      }
+    }
+  } else {
+    // Check if it's a combo slug first
+    const combo = db.select().from(combos)
+      .where(eq(combos.slug, requestedModel))
+      .get();
+
+    if (combo && combo.enabled) {
+      // Build fallback chain from combo models
+      const comboModels: ComboModel[] = safeJsonParse<ComboModel[]>(combo.models, []);
+      const sorted = comboModels.sort((a, b) => a.priority - b.priority);
+
+      for (const entry of sorted) {
+        const provider = db.select().from(providers)
+          .where(eq(providers.id, entry.providerId))
+          .get();
+
+        if (provider && provider.enabled) {
+          results.push({
+            providerId: provider.id,
+            providerName: provider.name,
+            baseUrl: provider.baseUrl,
+            apiKey: provider.apiKey,
+            model: entry.model,
+          });
+        }
+      }
+    } else {
+      // For direct model, just return the single match
+      const result = resolveDirectModel(requestedModel);
+      if (result) results.push(result);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Log a request result.
+ */
+export function logRequest(params: {
+  model: string;
+  providerId: string | null;
+  comboId?: string | null;
+  apiKeyId?: string | null;
+  tokensIn?: number;
+  tokensOut?: number;
+  latencyMs: number;
+  status: "success" | "error" | "fallback";
+  error?: string;
+}) {
+  const entry = {
+    id: uuidv4(),
+    timestamp: new Date().toISOString(),
+    model: params.model,
+    providerId: params.providerId,
+    comboId: params.comboId || null,
+    apiKeyId: params.apiKeyId || null,
+    tokensIn: params.tokensIn || null,
+    tokensOut: params.tokensOut || null,
+    latencyMs: params.latencyMs,
+    status: params.status,
+    error: params.error || null,
+  };
+
+  db.insert(requestLogs).values(entry).run();
+
+  // Push to SSE subscribers
+  notifySSE({ type: "log", data: entry });
+}
