@@ -314,10 +314,15 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
       const comboModels: ComboModel[] = safeJsonParse<ComboModel[]>(combo.models, []);
       const sorted = comboModels.sort((a, b) => a.priority - b.priority);
 
+      // Batch fetch all providers in one query (fixes N+1 problem)
+      const providerIds = Array.from(new Set(sorted.map(m => m.providerId)));
+      const allProviders = db.select().from(providers)
+        .where(inArray(providers.id, providerIds))
+        .all();
+      const providerMap = new Map(allProviders.map(p => [p.id, p]));
+
       for (const entry of sorted) {
-        const provider = db.select().from(providers)
-          .where(eq(providers.id, entry.providerId))
-          .get();
+        const provider = providerMap.get(entry.providerId);
 
         if (provider && provider.enabled) {
           results.push({

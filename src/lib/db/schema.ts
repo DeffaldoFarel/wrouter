@@ -61,6 +61,12 @@ export const requestLogs = sqliteTable("request_logs", {
   timestampStatusIdx: index("timestamp_status_idx").on(table.timestamp, table.status),
 }));
 
+// Sessions table
+export const sessions = sqliteTable("sessions", {
+  token: text("token").primaryKey(),
+  expiresAt: integer("expires_at").notNull(),
+});
+
 // Settings table
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),

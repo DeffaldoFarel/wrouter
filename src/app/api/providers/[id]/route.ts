@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
 import { validateProviderUpdate } from "@/lib/validation";
 import { encrypt, isEncrypted, safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
+import { invalidateProviderCache } from "@/lib/router/engine";
 
 function checkAuth(req: NextRequest): boolean {
   const token = req.cookies.get("session_token")?.value;
@@ -61,9 +62,13 @@ export async function PUT(
     return NextResponse.json({ error: "Provider not found" }, { status: 404 });
   }
 
-  // If prefix changed, check uniqueness
+  // If prefix changed, check uniqueness (exclude current provider)
   if (prefix && prefix !== existing.prefix) {
-    const prefixExists = db.select().from(providers).where(eq(providers.prefix, prefix)).get();
+    const prefixExists = db
+      .select()
+      .from(providers)
+      .where(and(eq(providers.prefix, prefix), ne(providers.id, id)))
+      .get();
     if (prefixExists) {
       return NextResponse.json(
         { error: "A provider with this prefix already exists" },
@@ -95,6 +100,7 @@ export async function PUT(
   };
 
   db.update(providers).set(updated).where(eq(providers.id, id)).run();
+  invalidateProviderCache();
 
   return NextResponse.json({
     id,
@@ -119,6 +125,7 @@ export async function DELETE(
   }
 
   db.delete(providers).where(eq(providers.id, id)).run();
+  invalidateProviderCache();
 
   return NextResponse.json({ success: true });
 }

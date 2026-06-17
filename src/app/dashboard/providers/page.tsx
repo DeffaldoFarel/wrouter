@@ -404,7 +404,8 @@ export default function ProvidersPage() {
           </div>
           <div className="grid gap-2 grid-cols-2 lg:grid-cols-4">
             {KNOWN_API_KEY_PROVIDERS.map((known) => {
-              const connected = providers.find(p => p.prefix === known.prefix && p.type === "apikey") ?? null;
+              // Match by type + name instead of prefix, so prefix changes don't break the link
+              const connected = providers.find(p => p.name === known.name && p.type === "apikey") ?? null;
               return (
                 <ApiKeyProviderSlot
                   key={known.prefix}

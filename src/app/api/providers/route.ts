@@ -7,6 +7,7 @@ import { verifySession } from "@/lib/auth/session";
 import { validateUrl } from "@/lib/ssrf-guard";
 import { encrypt, safeDecryptApiKey } from "@/lib/crypto";
 import { validateProvider } from "@/lib/validation";
+import { invalidateProviderCache } from "@/lib/router/engine";
 
 function checkAuth(req: NextRequest): boolean {
   const token = req.cookies.get("session_token")?.value;
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest) {
     };
 
     db.insert(providers).values(provider).run();
+    invalidateProviderCache();
 
     return NextResponse.json({
       ...provider,

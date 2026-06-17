@@ -5,8 +5,22 @@ const IV_LENGTH = 16;
 const PREFIX = "enc:v1:";
 
 /**
+ * Derive a unique, deterministic salt from JWT_SECRET.
+ * This ensures each installation has a unique salt without storing it separately.
+ */
+function getDerivedSalt(): string {
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new Error("JWT_SECRET environment variable must be set for salt derivation");
+  }
+  // Hash JWT_SECRET with a fixed context to produce a unique salt per installation
+  return crypto.createHash("sha256").update(`${jwtSecret}:wrouter-salt-v1`).digest("hex");
+}
+
+/**
  * Derive a 32-byte encryption key from environment variables.
  * Priority: ENCRYPTION_KEY (direct or derived) > JWT_SECRET (derived via scrypt)
+ * Salt is now derived from JWT_SECRET to ensure uniqueness per installation.
  */
 function getEncryptionKey(): Buffer {
   const directKey = process.env.ENCRYPTION_KEY;
@@ -15,13 +29,16 @@ function getEncryptionKey(): Buffer {
     if (/^[0-9a-f]{64}$/i.test(directKey)) {
       return Buffer.from(directKey, "hex");
     }
-    // Otherwise derive a 32-byte key from the passphrase
-    return crypto.scryptSync(directKey, "wrouter-enc-salt-v1", 32);
+    // Otherwise derive a 32-byte key from the passphrase using derived salt
+    const salt = getDerivedSalt();
+    return crypto.scryptSync(directKey, salt, 32);
   }
 
   const jwtSecret = process.env.JWT_SECRET;
   if (jwtSecret) {
-    return crypto.scryptSync(jwtSecret, "wrouter-jwt-salt-v1", 32);
+    // Derive key from JWT_SECRET using its own hash as salt for uniqueness
+    const salt = getDerivedSalt();
+    return crypto.scryptSync(jwtSecret, salt, 32);
   }
 
   throw new Error(

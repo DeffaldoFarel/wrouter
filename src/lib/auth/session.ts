@@ -1,29 +1,11 @@
 import { db } from "../db";
-import { settings } from "../db/schema";
+import { settings, sessions } from "../db/schema";
 import { apiKeys } from "../db/schema";
-import { eq } from "drizzle-orm";
-import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
+import { eq, lt } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { randomInt } from "crypto";
 
 const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-// Use a separate SQLite connection for sessions to avoid circular imports
-const DATA_DIR = path.join(process.cwd(), "data");
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-const sessionDb = new Database(path.join(DATA_DIR, "wrouter.db"));
-
-// Ensure sessions table exists
-sessionDb.exec(`
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    expires_at INTEGER NOT NULL
-  );
-`);
 
 function generateToken(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -67,34 +49,39 @@ export function createSession(): string {
   const token = generateToken();
   const expiresAt = Date.now() + SESSION_DURATION;
 
-  sessionDb.prepare("INSERT OR REPLACE INTO sessions (token, expires_at) VALUES (?, ?)").run(token, expiresAt);
+  db.insert(sessions)
+    .values({ token, expiresAt })
+    .onConflictDoUpdate({ target: sessions.token, set: { expiresAt } })
+    .run();
 
-  // Cleanup expired sessions
-  sessionDb.prepare("DELETE FROM sessions WHERE expires_at < ?").run(Date.now());
+  // Cleanup expired sessions with 1% probability
+  if (Math.random() < 0.01) {
+    db.delete(sessions).where(lt(sessions.expiresAt, Date.now())).run();
+  }
 
   return token;
 }
 
 export function verifySession(token: string): boolean {
-  const row = sessionDb.prepare("SELECT expires_at FROM sessions WHERE token = ?").get(token) as { expires_at: number } | undefined;
+  const row = db.select().from(sessions).where(eq(sessions.token, token)).get();
 
   if (!row) return false;
-  if (Date.now() > row.expires_at) {
-    sessionDb.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  if (Date.now() > row.expiresAt) {
+    db.delete(sessions).where(eq(sessions.token, token)).run();
     return false;
   }
 
   // Periodic cleanup of expired sessions (runs on every verify to prevent accumulation)
   // Only cleanup ~1% of the time to avoid performance impact
   if (Math.random() < 0.01) {
-    sessionDb.prepare("DELETE FROM sessions WHERE expires_at < ?").run(Date.now());
+    db.delete(sessions).where(lt(sessions.expiresAt, Date.now())).run();
   }
 
   return true;
 }
 
 export function destroySession(token: string): void {
-  sessionDb.prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  db.delete(sessions).where(eq(sessions.token, token)).run();
 }
 
 export function verifyApiKey(apiKey: string): { id: string; allowedModels: string[] } | null {

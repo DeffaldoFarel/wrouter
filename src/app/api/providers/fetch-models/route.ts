@@ -19,32 +19,35 @@ export async function POST(req: NextRequest) {
   try {
     const { baseUrl, apiKey, providerId } = await req.json();
 
-    if (!baseUrl) {
-      return NextResponse.json(
-        { error: "baseUrl is required" },
-        { status: 400 }
-      );
-    }
-
-    // If providerId is given, use the stored API key and detect type
+    // If providerId is given, use the stored API key, baseUrl, and detect type
     let resolvedApiKey = apiKey;
+    let resolvedBaseUrl = baseUrl;
     let providerType = "custom";
+    
     if (providerId) {
       const provider = db.select().from(providers).where(eq(providers.id, providerId)).get();
       if (provider) {
         if (!resolvedApiKey) resolvedApiKey = safeDecryptApiKey(provider.apiKey);
+        if (!resolvedBaseUrl) resolvedBaseUrl = provider.baseUrl;
         providerType = provider.type ?? "custom";
       }
     }
 
-    if (!resolvedApiKey) {
+    if (!resolvedBaseUrl) {
       return NextResponse.json(
-        { error: "apiKey is required" },
+        { error: "baseUrl is required (or provide providerId to use stored baseUrl)" },
         { status: 400 }
       );
     }
 
-    const url = `${baseUrl.replace(/\/$/, "")}/models`;
+    if (!resolvedApiKey) {
+      return NextResponse.json(
+        { error: "apiKey is required (or provide providerId to use stored apiKey)" },
+        { status: 400 }
+      );
+    }
+
+    const url = `${resolvedBaseUrl.replace(/\/$/, "")}/models`;
 
     // SSRF guard: validate the target URL before fetching
     const ssrfCheck = await validateUrl(url);
