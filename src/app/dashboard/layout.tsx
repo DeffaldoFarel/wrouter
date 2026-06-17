@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useTheme } from "next-themes";
+import { APP_VERSION } from "@/lib/version";
+import { Badge } from "@/components/ui/badge";
 import {
   LayoutDashboard,
   Server,
@@ -71,6 +73,7 @@ export default function DashboardLayout({
         <div className="p-6 border-b">
           <h1 className="text-xl font-bold">WRouter</h1>
           <p className="text-xs text-muted-foreground mt-1">AI API Unified Router</p>
+          <Badge variant="secondary" className="text-[10px] mt-1">v{APP_VERSION}</Badge>
         </div>
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => {

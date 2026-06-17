@@ -3,6 +3,9 @@ import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
+import { validateProviderUpdate } from "@/lib/validation";
+import { encrypt, isEncrypted, safeDecryptApiKey } from "@/lib/crypto";
+import { validateUrl } from "@/lib/ssrf-guard";
 
 function checkAuth(req: NextRequest): boolean {
   const token = req.cookies.get("session_token")?.value;
@@ -27,7 +30,7 @@ export async function GET(
   return NextResponse.json({
     ...provider,
     models: JSON.parse(provider.models),
-    apiKey: maskApiKey(provider.apiKey),
+    apiKey: maskApiKey(safeDecryptApiKey(provider.apiKey)),
   });
 }
 
@@ -41,6 +44,16 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
+
+  // Validate request body (partial — only provided fields)
+  const validation = validateProviderUpdate(body);
+  if (!validation.valid) {
+    return NextResponse.json(
+      { error: "Validation failed", errors: validation.errors },
+      { status: 400 }
+    );
+  }
+
   const { name, prefix, baseUrl, apiKey, models, enabled, type } = body;
 
   const existing = db.select().from(providers).where(eq(providers.id, id)).get();
@@ -48,14 +61,8 @@ export async function PUT(
     return NextResponse.json({ error: "Provider not found" }, { status: 404 });
   }
 
-  // If prefix changed, validate and check uniqueness
+  // If prefix changed, check uniqueness
   if (prefix && prefix !== existing.prefix) {
-    if (!/^[a-z0-9-]+$/.test(prefix)) {
-      return NextResponse.json(
-        { error: "prefix must be lowercase alphanumeric with hyphens only" },
-        { status: 400 }
-      );
-    }
     const prefixExists = db.select().from(providers).where(eq(providers.prefix, prefix)).get();
     if (prefixExists) {
       return NextResponse.json(
@@ -65,11 +72,22 @@ export async function PUT(
     }
   }
 
+  // SSRF guard: validate baseUrl if it's being updated
+  if (baseUrl) {
+    const ssrfCheck = await validateUrl(baseUrl);
+    if (!ssrfCheck.valid) {
+      return NextResponse.json(
+        { error: `SSRF protection: ${ssrfCheck.error}` },
+        { status: 400 }
+      );
+    }
+  }
+
   const updated = {
     name: name ?? existing.name,
     prefix: prefix ?? existing.prefix,
     baseUrl: baseUrl ? baseUrl.replace(/\/$/, "") : existing.baseUrl,
-    apiKey: apiKey ?? existing.apiKey,
+    apiKey: apiKey ? (isEncrypted(apiKey) ? apiKey : encrypt(apiKey)) : existing.apiKey,
     models: models ? JSON.stringify(models) : existing.models,
     enabled: enabled !== undefined ? enabled : existing.enabled,
     type: type ?? existing.type,
@@ -82,7 +100,7 @@ export async function PUT(
     id,
     ...updated,
     models: JSON.parse(updated.models),
-    apiKey: maskApiKey(updated.apiKey),
+    apiKey: maskApiKey(safeDecryptApiKey(updated.apiKey)),
   });
 }
 

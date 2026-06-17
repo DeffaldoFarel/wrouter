@@ -1,4 +1,5 @@
 import { RoutingResult, getFallbackChain, logRequest, incrementActiveJobs, decrementActiveJobs } from "./engine";
+import logger from "@/lib/logger";
 
 interface ChatCompletionRequest {
   model: string;
@@ -42,12 +43,12 @@ export async function proxyWithFallback(
         const responseForClient = response.clone();
         
         // Parse original response to extract token usage
-        let tokensIn: number | null = null;
-        let tokensOut: number | null = null;
+        let tokensIn: number | undefined = undefined;
+        let tokensOut: number | undefined = undefined;
         try {
           const json = await response.json();
-          tokensIn  = json.usage?.prompt_tokens     ?? null;
-          tokensOut = json.usage?.completion_tokens ?? null;
+          tokensIn  = json.usage?.prompt_tokens     ?? undefined;
+          tokensOut = json.usage?.completion_tokens ?? undefined;
         } catch { /* ignore parse errors */ }
 
         logRequest({
@@ -59,6 +60,16 @@ export async function proxyWithFallback(
           tokensIn,
           tokensOut,
         });
+
+        logger.info({
+          model: target.model,
+          provider: target.providerName,
+          providerId: target.providerId,
+          latencyMs,
+          tokensIn,
+          tokensOut,
+          stream: false,
+        }, "Proxy request succeeded");
 
         // Return cloned response (body not consumed)
         return { response: responseForClient, providerId: target.providerId, latencyMs };
@@ -76,6 +87,15 @@ export async function proxyWithFallback(
         status: "fallback",
         error: lastError.message,
       });
+
+      logger.warn({
+        model: target.model,
+        provider: target.providerName,
+        providerId: target.providerId,
+        status: response.status,
+        latencyMs,
+        error: lastError.message,
+      }, "Proxy fallback to next provider");
     } catch (err) {
       const latencyMs = Date.now() - startTime;
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -88,6 +108,14 @@ export async function proxyWithFallback(
         status: "error",
         error: lastError.message,
       });
+
+      logger.error({
+        err: lastError,
+        model: target.model,
+        provider: target.providerName,
+        providerId: target.providerId,
+        latencyMs,
+      }, "Proxy request error");
     }
   }
 
@@ -187,6 +215,15 @@ export async function proxyStreamWithFallback(
           status: "fallback",
           error: lastError.message,
         });
+        logger.warn({
+          model: target.model,
+          provider: target.providerName,
+          providerId: target.providerId,
+          status: response.status,
+          latencyMs,
+          stream: true,
+          error: lastError.message,
+        }, "Stream proxy fallback to next provider");
         continue;
       }
 
@@ -198,8 +235,8 @@ export async function proxyStreamWithFallback(
 
       // Tap the stream to extract token usage from the final SSE chunk
       const originalStream = response.body;
-      let tokensIn: number | null = null;
-      let tokensOut: number | null = null;
+      let tokensIn: number | undefined = undefined;
+      let tokensOut: number | undefined = undefined;
 
       const tappedStream = new ReadableStream({
         async start(controller) {
@@ -239,6 +276,15 @@ export async function proxyStreamWithFallback(
               tokensIn,
               tokensOut,
             });
+            logger.info({
+              model: target.model,
+              provider: target.providerName,
+              providerId: target.providerId,
+              latencyMs: totalDuration,
+              tokensIn,
+              tokensOut,
+              stream: true,
+            }, "Stream request completed");
           }
         },
       });
@@ -255,6 +301,14 @@ export async function proxyStreamWithFallback(
         status: "error",
         error: lastError.message,
       });
+      logger.error({
+        err: lastError,
+        model: target.model,
+        provider: target.providerName,
+        providerId: target.providerId,
+        latencyMs,
+        stream: true,
+      }, "Stream proxy error");
     }
   }
 

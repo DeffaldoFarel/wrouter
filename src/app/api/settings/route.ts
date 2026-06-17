@@ -35,7 +35,7 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const allowedKeys = ["password", "rtk_enabled", "caveman_enabled"];
+    const allowedKeys = ["password", "rtk_enabled", "caveman_enabled", "log_retention_days"];
 
     for (const [key, value] of Object.entries(body)) {
       if (!allowedKeys.includes(key)) continue;

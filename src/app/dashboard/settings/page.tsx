@@ -24,6 +24,10 @@ export default function SettingsPage() {
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState("");
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
 
   useEffect(() => {
     fetchAll();
@@ -69,6 +73,58 @@ export default function SettingsPage() {
       }
     } catch {
       toast.error("Connection error");
+    }
+  }
+
+  async function downloadBackup() {
+    setBackupLoading(true);
+    try {
+      const res = await fetch("/api/backup");
+      if (!res.ok) {
+        toast.error("Failed to create backup");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const disposition = res.headers.get("Content-Disposition");
+      const filename = disposition?.match(/filename="(.+)"/)?.[1] || "wrouter-backup.db";
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Backup downloaded successfully");
+    } catch {
+      toast.error("Backup failed");
+    } finally {
+      setBackupLoading(false);
+    }
+  }
+
+  async function uploadRestore() {
+    if (!restoreFile) return;
+    setRestoreLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("database", restoreFile);
+      const res = await fetch("/api/restore", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message || "Database restored successfully");
+        setRestoreFile(null);
+        setRestoreDialogOpen(false);
+      } else {
+        toast.error(data.error || "Restore failed");
+      }
+    } catch {
+      toast.error("Connection error");
+    } finally {
+      setRestoreLoading(false);
     }
   }
 
@@ -141,6 +197,91 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Backup & Restore */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Backup & Restore</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Backup */}
+          <div className="flex items-center justify-between rounded-md border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">Download Backup</p>
+              <p className="text-xs text-muted-foreground">Export the entire database (providers, API keys, combos, logs, settings)</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={downloadBackup}
+              disabled={backupLoading}
+            >
+              {backupLoading ? "Creating..." : "Download Backup"}
+            </Button>
+          </div>
+
+          {/* Restore */}
+          <div className="flex items-center justify-between rounded-md border px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">Restore from Backup</p>
+              <p className="text-xs text-muted-foreground">Upload a .db file to replace all current data. Requires page refresh after restore.</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <input
+                type="file"
+                accept=".db"
+                onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+                className="hidden"
+                id="restore-file"
+              />
+              <label
+                htmlFor="restore-file"
+                className="cursor-pointer text-xs text-primary hover:underline"
+              >
+                {restoreFile ? restoreFile.name : "Choose file"}
+              </label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRestoreDialogOpen(true)}
+                disabled={!restoreFile || restoreLoading}
+              >
+                Restore
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Restore Confirmation Dialog */}
+      <Dialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Database Restore</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This will <strong>replace ALL current data</strong> (providers, API keys, combos, logs, settings) with the contents of the uploaded backup file. This cannot be undone.
+            </p>
+            {restoreFile && (
+              <div className="rounded-md bg-muted px-3 py-2 text-xs font-mono">
+                {restoreFile.name} ({(restoreFile.size / 1024).toFixed(1)} KB)
+              </div>
+            )}
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(false)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                disabled={restoreLoading}
+                onClick={uploadRestore}
+              >
+                {restoreLoading ? "Restoring..." : "Confirm Restore"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Danger Zone */}
       <Card className="border-destructive/40">

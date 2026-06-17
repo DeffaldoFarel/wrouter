@@ -3,16 +3,32 @@ import { db } from "@/lib/db";
 import { providers, combos } from "@/lib/db/schema";
 import { verifyApiKey } from "@/lib/auth/session";
 
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+function corsResponse(body: unknown, init?: ResponseInit) {
+  const headers = new Headers(init?.headers);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  return NextResponse.json(body, { ...init, headers });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Missing API key" }, { status: 401 });
+    return corsResponse({ error: "Missing API key" }, { status: 401 });
   }
 
   const apiKey = authHeader.slice(7);
   const apiKeyRecord = verifyApiKey(apiKey);
   if (!apiKeyRecord) {
-    return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
+    return corsResponse({ error: "Invalid API key" }, { status: 401 });
   }
 
   // Collect all models from all enabled providers
@@ -86,7 +102,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({
+  return corsResponse({
     object: "list",
     data: filteredModels,
   });

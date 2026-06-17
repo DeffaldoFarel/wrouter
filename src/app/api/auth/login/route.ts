@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyPassword, createSession } from "@/lib/auth/session";
+import { loginLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
+import logger from "@/lib/logger";
 
 export async function POST(req: NextRequest) {
+  // Rate limit: 5 login attempts per minute per IP
+  const ip = getClientIp(req);
+  const limitCheck = loginLimiter.consume(ip);
+  if (!limitCheck.allowed) {
+    return rateLimitResponse(limitCheck.retryAfter);
+  }
+
   try {
     const body = await req.json();
     const { password } = body;
@@ -15,6 +24,7 @@ export async function POST(req: NextRequest) {
 
     const isValid = verifyPassword(password);
     if (!isValid) {
+      logger.info({ ip, success: false }, "Login attempt failed");
       return NextResponse.json(
         { error: "Invalid password" },
         { status: 401 }
@@ -23,10 +33,12 @@ export async function POST(req: NextRequest) {
 
     const token = createSession();
 
+    logger.info({ ip, success: true }, "Login attempt succeeded");
+
     const response = NextResponse.json({ success: true });
     response.cookies.set("session_token", token, {
       httpOnly: true,
-      secure: false,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 60 * 60 * 24, // 24 hours
       path: "/",
@@ -34,7 +46,7 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (err) {
-    console.error("Login error:", err);
+    logger.error({ err, ip }, "Login error");
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

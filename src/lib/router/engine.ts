@@ -2,6 +2,8 @@ import { db } from "../db";
 import { providers, combos, requestLogs } from "../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { safeDecryptApiKey } from "../crypto";
+import logger from "@/lib/logger";
 
 // In-memory counter of active (in-flight) proxy jobs.
 // LIMITATION: This is per-process only. If the app runs in cluster/multi-process mode
@@ -90,6 +92,8 @@ export interface RoutingResult {
  * - "model-name" → find first provider that has this model
  */
 export function resolveModel(requestedModel: string): RoutingResult | null {
+  logger.debug({ model: requestedModel }, "Resolving model");
+
   // Check if it's a prefixed request (contains slash)
   if (requestedModel.includes("/")) {
     // Only split on the FIRST slash — model names can contain slashes (e.g. openrouter/deepseek/deepseek-chat-v3)
@@ -112,7 +116,7 @@ export function resolveModel(requestedModel: string): RoutingResult | null {
         providerId: providerByPrefix.id,
         providerName: providerByPrefix.name,
         baseUrl: providerByPrefix.baseUrl,
-        apiKey: providerByPrefix.apiKey,
+        apiKey: safeDecryptApiKey(providerByPrefix.apiKey),
         model: modelName,
       };
     }
@@ -169,7 +173,7 @@ function resolveComboModel(slug: string, modelName: string): RoutingResult | nul
         providerId: provider.id,
         providerName: provider.name,
         baseUrl: provider.baseUrl,
-        apiKey: provider.apiKey,
+        apiKey: safeDecryptApiKey(provider.apiKey),
         model: entry.model,
       };
     }
@@ -202,7 +206,7 @@ function resolveComboFirstModel(combo: typeof combos.$inferSelect): RoutingResul
         providerId: provider.id,
         providerName: provider.name,
         baseUrl: provider.baseUrl,
-        apiKey: provider.apiKey,
+        apiKey: safeDecryptApiKey(provider.apiKey),
         model: entry.model,
       };
     }
@@ -226,7 +230,7 @@ function resolveDirectModel(modelName: string): RoutingResult | null {
         providerId: provider.id,
         providerName: provider.name,
         baseUrl: provider.baseUrl,
-        apiKey: provider.apiKey,
+        apiKey: safeDecryptApiKey(provider.apiKey),
         model: modelName,
       };
     }
@@ -260,7 +264,7 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
           providerId: providerByPrefix.id,
           providerName: providerByPrefix.name,
           baseUrl: providerByPrefix.baseUrl,
-          apiKey: providerByPrefix.apiKey,
+          apiKey: safeDecryptApiKey(providerByPrefix.apiKey),
           model: modelName,
         });
       }
@@ -294,7 +298,7 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
           providerId: provider.id,
           providerName: provider.name,
           baseUrl: provider.baseUrl,
-          apiKey: provider.apiKey,
+          apiKey: safeDecryptApiKey(provider.apiKey),
           model: entry.model,
         });
       }
@@ -320,7 +324,7 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
             providerId: provider.id,
             providerName: provider.name,
             baseUrl: provider.baseUrl,
-            apiKey: provider.apiKey,
+            apiKey: safeDecryptApiKey(provider.apiKey),
             model: entry.model,
           });
         }
@@ -364,6 +368,15 @@ export function logRequest(params: {
   };
 
   db.insert(requestLogs).values(entry).run();
+
+  logger.debug({
+    model: params.model,
+    providerId: params.providerId,
+    status: params.status,
+    latencyMs: params.latencyMs,
+    tokensIn: params.tokensIn,
+    tokensOut: params.tokensOut,
+  }, "Request logged to DB");
 
   // Push to SSE subscribers
   notifySSE({ type: "log", data: entry });

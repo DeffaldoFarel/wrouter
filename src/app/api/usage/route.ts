@@ -4,6 +4,7 @@ import { requestLogs, providers, apiKeys } from "@/lib/db/schema";
 import { gte } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
 import { getActiveJobs } from "@/lib/router/engine";
+import { maybeCleanupLogs } from "@/lib/log-retention";
 
 function checkAuth(req: NextRequest): boolean {
   const token = req.cookies.get("session_token")?.value;
@@ -66,6 +67,9 @@ export async function GET(req: NextRequest) {
   if (!checkAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Fire-and-forget log retention cleanup
+  maybeCleanupLogs();
 
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter") || "24h";

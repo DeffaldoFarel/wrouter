@@ -4,6 +4,9 @@ import { providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { verifySession } from "@/lib/auth/session";
+import { validateUrl } from "@/lib/ssrf-guard";
+import { encrypt, safeDecryptApiKey } from "@/lib/crypto";
+import { validateProvider } from "@/lib/validation";
 
 function checkAuth(req: NextRequest): boolean {
   const token = req.cookies.get("session_token")?.value;
@@ -19,7 +22,7 @@ export async function GET(req: NextRequest) {
   const result = allProviders.map((p) => ({
     ...p,
     models: JSON.parse(p.models),
-    apiKey: maskApiKey(p.apiKey),
+    apiKey: maskApiKey(safeDecryptApiKey(p.apiKey)),
   }));
 
   return NextResponse.json(result);
@@ -32,26 +35,23 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+
+    // Validate request body
+    const validation = validateProvider(body);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: "Validation failed", errors: validation.errors },
+        { status: 400 }
+      );
+    }
+
     const { name, prefix, baseUrl, apiKey, type = "custom" } = body;
 
-    if (!name || !prefix || !baseUrl || !apiKey) {
+    // SSRF guard: validate baseUrl before storing
+    const ssrfCheck = await validateUrl(baseUrl);
+    if (!ssrfCheck.valid) {
       return NextResponse.json(
-        { error: "name, prefix, baseUrl, and apiKey are required" },
-        { status: 400 }
-      );
-    }
-
-    if (type !== "custom" && type !== "apikey") {
-      return NextResponse.json(
-        { error: "type must be 'custom' or 'apikey'" },
-        { status: 400 }
-      );
-    }
-
-    // Validate prefix format
-    if (!/^[a-z0-9-]+$/.test(prefix)) {
-      return NextResponse.json(
-        { error: "prefix must be lowercase alphanumeric with hyphens only" },
+        { error: `SSRF protection: ${ssrfCheck.error}` },
         { status: 400 }
       );
     }
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
       name,
       prefix,
       baseUrl: baseUrl.replace(/\/$/, ""),
-      apiKey,
+      apiKey: encrypt(apiKey),
       models: JSON.stringify([]),
       enabled: true,
       type,
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ...provider,
       models: [],
-      apiKey: maskApiKey(provider.apiKey),
+      apiKey: maskApiKey(apiKey),
     }, { status: 201 });
   } catch {
     return NextResponse.json(

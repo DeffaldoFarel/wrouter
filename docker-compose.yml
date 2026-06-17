@@ -1,0 +1,33 @@
+# ==============================================================================
+# WRouter — Docker Compose
+# ==============================================================================
+
+services:
+  wrouter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wrouter
+    restart: unless-stopped
+
+    ports:
+      - "20128:20128"
+
+    volumes:
+      - wrouter-data:/app/data
+
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-http://localhost:20128}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:20128/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  wrouter-data:
+    driver: local

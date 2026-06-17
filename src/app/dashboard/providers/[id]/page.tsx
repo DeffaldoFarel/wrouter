@@ -237,10 +237,10 @@ export default function ProviderDetailPage() {
             onCheckedChange={toggleProvider}
           />
           <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                <Trash2 className="h-4 w-4" />
-              </Button>
+            <DialogTrigger render={
+              <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10" />
+            }>
+              <Trash2 className="h-4 w-4" />
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>

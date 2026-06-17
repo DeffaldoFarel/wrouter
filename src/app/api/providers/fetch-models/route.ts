@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
+import { safeDecryptApiKey } from "@/lib/crypto";
+import { validateUrl } from "@/lib/ssrf-guard";
 
 function checkAuth(req: NextRequest): boolean {
   const token = req.cookies.get("session_token")?.value;
@@ -30,7 +32,7 @@ export async function POST(req: NextRequest) {
     if (providerId) {
       const provider = db.select().from(providers).where(eq(providers.id, providerId)).get();
       if (provider) {
-        if (!resolvedApiKey) resolvedApiKey = provider.apiKey;
+        if (!resolvedApiKey) resolvedApiKey = safeDecryptApiKey(provider.apiKey);
         providerType = provider.type ?? "custom";
       }
     }
@@ -43,6 +45,15 @@ export async function POST(req: NextRequest) {
     }
 
     const url = `${baseUrl.replace(/\/$/, "")}/models`;
+
+    // SSRF guard: validate the target URL before fetching
+    const ssrfCheck = await validateUrl(url);
+    if (!ssrfCheck.valid) {
+      return NextResponse.json(
+        { error: `SSRF protection: ${ssrfCheck.error}` },
+        { status: 400 }
+      );
+    }
 
     const response = await fetch(url, {
       headers: {

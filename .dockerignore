@@ -1,0 +1,50 @@
+# ==============================================================================
+# WRouter — Docker ignore
+# ==============================================================================
+
+# Dependencies & build output (rebuilt inside container)
+node_modules
+.next
+out
+dist
+
+# Database / runtime data (persisted via Docker volume)
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Version control
+.git
+.gitignore
+
+# Documentation
+*.md
+LICENSE
+
+# Environment files (inject via docker-compose environment or --env-file)
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+
+# IDE / editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (avoid recursive context)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# CI / misc
+.github
+.gitlab-ci.yml
+*.log

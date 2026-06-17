@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
+import { safeDecryptApiKey } from "@/lib/crypto";
+import { validateUrl } from "@/lib/ssrf-guard";
 
 function checkAuth(req: NextRequest): boolean {
   const token = req.cookies.get("session_token")?.value;
@@ -28,13 +30,23 @@ export async function GET(
 
     const start = Date.now();
 
+    // SSRF guard: validate provider URL before fetching
+    const ssrfCheck = await validateUrl(`${provider.baseUrl}/models`);
+    if (!ssrfCheck.valid) {
+      return NextResponse.json({
+        online: false,
+        latencyMs: Date.now() - start,
+        error: `SSRF protection: ${ssrfCheck.error}`,
+      });
+    }
+
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
 
       const res = await fetch(`${provider.baseUrl}/models`, {
         headers: {
-          Authorization: `Bearer ${provider.apiKey}`,
+          Authorization: `Bearer ${safeDecryptApiKey(provider.apiKey)}`,
           "Content-Type": "application/json",
         },
         signal: controller.signal,

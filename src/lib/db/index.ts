@@ -4,6 +4,7 @@ import * as schema from "./schema";
 import path from "path";
 import fs from "fs";
 import bcrypt from "bcryptjs";
+import { randomInt } from "crypto";
 
 const DATA_DIR = path.join(process.cwd(), "data");
 
@@ -127,6 +128,7 @@ export function initializeDatabase() {
     { key: "port", value: "20128" },
     { key: "rtk_enabled", value: "false" },
     { key: "caveman_enabled", value: "false" },
+    { key: "log_retention_days", value: "30" },
   ];
 
   const insertSetting = sqlite.prepare(
@@ -142,7 +144,7 @@ export function generateApiKey(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
   let result = "wkz-";
   for (let i = 0; i < 32; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(randomInt(chars.length));
   }
   return result;
 }

@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import bcrypt from "bcryptjs";
+import { randomInt } from "crypto";
 
 const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -28,7 +29,7 @@ function generateToken(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   let result = "";
   for (let i = 0; i < 64; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(randomInt(chars.length));
   }
   return result;
 }

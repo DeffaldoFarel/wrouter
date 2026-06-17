@@ -7,11 +7,33 @@ import { injectCavemanPrompt } from "@/lib/token-saver/caveman";
 import { db } from "@/lib/db";
 import { settings, combos, providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { chatLimiter, rateLimitResponse } from "@/lib/rate-limit";
+import { validateChatRequest } from "@/lib/validation";
+import logger from "@/lib/logger";
+import { maybeCleanupLogs } from "@/lib/log-retention";
+import { captureException } from "@/lib/sentry";
+
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+function corsResponse(body: unknown, init?: ResponseInit) {
+  const headers = new Headers(init?.headers);
+  for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v);
+  return NextResponse.json(body, { ...init, headers });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
 
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return NextResponse.json(
+    logger.warn({ key: authHeader?.slice(0, 12) }, "Unauthorized request");
+    return corsResponse(
       { error: { message: "Missing API key", type: "auth_error" } },
       { status: 401 }
     );
@@ -20,28 +42,50 @@ export async function POST(req: NextRequest) {
   const apiKey = authHeader.slice(7);
   const apiKeyRecord = verifyApiKey(apiKey);
   if (!apiKeyRecord) {
-    return NextResponse.json(
+    logger.warn({ key: authHeader?.slice(0, 12) }, "Unauthorized request");
+    return corsResponse(
       { error: { message: "Invalid API key", type: "auth_error" } },
       { status: 401 }
     );
   }
   const apiKeyId = apiKeyRecord.id;
 
+  // Rate limit: 60 requests per minute per API key
+  const limitCheck = chatLimiter.consume(apiKey);
+  if (!limitCheck.allowed) {
+    return rateLimitResponse(limitCheck.retryAfter);
+  }
+
+  let model: string | undefined;
+
   try {
     const body = await req.json();
-    const { model, stream } = body;
 
-    if (!model) {
-      return NextResponse.json(
-        { error: { message: "model is required", type: "invalid_request_error" } },
+    // Validate request body
+    const validation = validateChatRequest(body);
+    if (!validation.valid) {
+      return corsResponse(
+        { error: { message: "Validation failed", type: "invalid_request_error", errors: validation.errors } },
         { status: 400 }
       );
     }
 
+    model = body.model;
+    const stream = body.stream;
+
+    const requestStartTime = Date.now();
+
+    logger.info({
+      model,
+      apiKeyId,
+      stream: !!stream,
+      messageCount: body.messages?.length,
+    }, "Chat completion request");
+
     // Check if model is allowed for this API key
     if (apiKeyRecord.allowedModels.length > 0) {
       const allowed = apiKeyRecord.allowedModels;
-      let isAllowed = allowed.includes(model);
+      let isAllowed = allowed.includes(model!);
 
       // If not a direct match, check if it's a combo whose underlying models are allowed.
       // DESIGN: Combo is allowed if ANY underlying model is in allowedModels.
@@ -50,7 +94,7 @@ export async function POST(req: NextRequest) {
       //          and fallback to modelB/C will still work.
       // If stricter behavior is needed (ALL models must be allowed), change this logic.
       if (!isAllowed) {
-        const combo = db.select().from(combos).where(eq(combos.slug, model)).get();
+        const combo = db.select().from(combos).where(eq(combos.slug, model!)).get();
         if (combo && combo.enabled) {
           let comboModels: Array<{ model: string; providerId: string }>;
           try {
@@ -70,7 +114,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (!isAllowed) {
-        return NextResponse.json(
+        return corsResponse(
           { error: { message: `Model not allowed: ${model}`, type: "invalid_request_error" } },
           { status: 403 }
         );
@@ -93,18 +137,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Get fallback chain for the requested model
-    const fallbackChain = getFallbackChain(model);
+    const fallbackChain = getFallbackChain(model!);
 
     if (fallbackChain.length === 0) {
       // Try direct model resolution
-      const direct = resolveModel(model);
+      const direct = resolveModel(model!);
       if (direct) {
         fallbackChain.push(direct);
       }
     }
 
     if (fallbackChain.length === 0) {
-      return NextResponse.json(
+      return corsResponse(
         {
           error: {
             message: `Model not found: ${model}. Make sure the model is registered in WRouter.`,
@@ -128,6 +172,7 @@ export async function POST(req: NextRequest) {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           Connection: "keep-alive",
+          ...CORS_HEADERS,
         },
       });
     }
@@ -136,10 +181,17 @@ export async function POST(req: NextRequest) {
     const { response } = await proxyWithFallback(processedBody, fallbackChain, apiKeyId);
     const data = await response.json();
 
-    return NextResponse.json(data);
+    // Fire-and-forget log retention cleanup
+    maybeCleanupLogs();
+
+    return corsResponse(data);
   } catch (err) {
+    logger.error({ err, model }, "Chat completion failed");
+    captureException(err, {
+      tags: { route: "chat/completions" },
+    });
     const message = err instanceof Error ? err.message : "Internal server error";
-    return NextResponse.json(
+    return corsResponse(
       { error: { message, type: "server_error" } },
       { status: 500 }
     );
