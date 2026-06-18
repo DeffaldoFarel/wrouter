@@ -1,8 +1,9 @@
-"use client";
-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { changelog, Change, ChangeType } from "@/lib/changelog";
 import { Badge } from "@/components/ui/badge";
+import { parseChangelog } from "@/lib/changelog-parser";
+import type { Change, ChangeType } from "@/lib/changelog";
+
+const changelog = parseChangelog();
 
 const changeTypeConfig: Record<ChangeType, { label: string; className: string; icon: string }> = {
   added: {

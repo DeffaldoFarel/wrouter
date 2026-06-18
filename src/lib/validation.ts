@@ -38,10 +38,58 @@ export function validateChatRequest(body: any): ValidationResult {
 
       if (msg.content === undefined || msg.content === null) {
         errors.push(`messages[${idx}].content is required`);
-      } else if (typeof msg.content !== "string") {
-        errors.push(`messages[${idx}].content must be a string`);
-      } else if (msg.content.length > 100000) {
-        errors.push(`messages[${idx}].content must be max 100000 characters`);
+      } else if (typeof msg.content === "string") {
+        if (msg.content.length > 100000) {
+          errors.push(`messages[${idx}].content must be max 100000 characters`);
+        }
+      } else if (Array.isArray(msg.content)) {
+        // Multimodal content (OpenAI vision format)
+        if (msg.content.length === 0) {
+          errors.push(`messages[${idx}].content array must have at least 1 item`);
+        } else if (msg.content.length > 50) {
+          errors.push(`messages[${idx}].content array must have max 50 items`);
+        } else {
+          msg.content.forEach((part: any, partIdx: number) => {
+            if (!part || typeof part !== "object") {
+              errors.push(`messages[${idx}].content[${partIdx}] must be an object`);
+              return;
+            }
+
+            if (part.type === "text") {
+              if (typeof part.text !== "string") {
+                errors.push(`messages[${idx}].content[${partIdx}].text must be a string`);
+              } else if (part.text.length > 100000) {
+                errors.push(`messages[${idx}].content[${partIdx}].text must be max 100000 characters`);
+              }
+            } else if (part.type === "image_url") {
+              if (!part.image_url || typeof part.image_url !== "object") {
+                errors.push(`messages[${idx}].content[${partIdx}].image_url must be an object`);
+              } else if (typeof part.image_url.url !== "string") {
+                errors.push(`messages[${idx}].content[${partIdx}].image_url.url must be a string`);
+              } else if (part.image_url.url.length > 10_000_000) {
+                // ~7.5MB base64 image — prevents abuse
+                errors.push(`messages[${idx}].content[${partIdx}].image_url.url is too large (max ~7.5MB base64)`);
+              }
+              // detail is optional: "low" | "high" | "auto"
+              if (part.image_url?.detail !== undefined) {
+                const validDetails = ["low", "high", "auto"];
+                if (!validDetails.includes(part.image_url.detail)) {
+                  errors.push(`messages[${idx}].content[${partIdx}].image_url.detail must be one of: ${validDetails.join(", ")}`);
+                }
+              }
+            } else if (part.type === "tool_result" || part.type === "tool_use") {
+              // Anthropic-style tool blocks — pass through without strict validation
+              // (RTK token saver handles these separately)
+            } else if (!part.type) {
+              errors.push(`messages[${idx}].content[${partIdx}].type is required`);
+            } else {
+              // Unknown content type — allow pass-through for forward compatibility
+              // (providers may support custom content types)
+            }
+          });
+        }
+      } else {
+        errors.push(`messages[${idx}].content must be a string or an array of content parts`);
       }
     });
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,11 +17,33 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import {
+  Layers,
+  Plus,
+  Search,
+  Pencil,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  X,
+  GripVertical,
+  Activity,
+  Box,
+  Workflow,
+  CheckCircle2,
+  ArrowRight,
+  Copy,
+  AlertCircle,
+  XCircle,
+} from "lucide-react";
+import { getProviderIcon } from "@/components/provider-icons";
 
 interface Provider {
   id: string;
   name: string;
+  prefix: string;
   models: string[];
+  enabled: boolean;
 }
 
 interface ComboModel {
@@ -39,6 +61,228 @@ interface Combo {
   createdAt: string;
 }
 
+// ─────────────────────────────────────────────
+//  Brand Icon (same pattern as Providers page)
+// ─────────────────────────────────────────────
+
+function BrandIcon({ prefix, size = "sm" }: { prefix?: string; size?: "xs" | "sm" }) {
+  const Icon = prefix ? getProviderIcon(prefix) : null;
+  const dimensions = size === "xs" ? "h-4 w-4" : "h-5 w-5";
+  const box = size === "xs" ? "h-5 w-5" : "h-6 w-6";
+
+  if (Icon) {
+    return (
+      <div className={`flex items-center justify-center rounded shrink-0 bg-muted/50 border ${box}`}>
+        <Icon className={dimensions} />
+      </div>
+    );
+  }
+  return (
+    <div className={`flex items-center justify-center rounded shrink-0 bg-muted ${box}`}>
+      <Box className="h-3 w-3 text-muted-foreground" />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Stat Card
+// ─────────────────────────────────────────────
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  accent = "default",
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string | number;
+  hint?: string;
+  accent?: "default" | "success" | "warning";
+}) {
+  const accentClass = {
+    default: "text-foreground",
+    success: "text-green-600 dark:text-green-400",
+    warning: "text-amber-600 dark:text-amber-400",
+  }[accent];
+
+  return (
+    <Card>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+              {label}
+            </p>
+            <p className={`text-2xl font-bold tabular-nums ${accentClass}`}>{value}</p>
+            {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+          </div>
+          <div className={`rounded-md bg-muted p-2 ${accentClass}`}>
+            <Icon className="h-4 w-4" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Combo Card
+// ─────────────────────────────────────────────
+
+function ComboCard({
+  combo,
+  providers,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  combo: Combo;
+  providers: Provider[];
+  onToggle: (id: string, enabled: boolean) => void;
+  onEdit: (combo: Combo) => void;
+  onDelete: (combo: Combo) => void;
+}) {
+  const sortedModels = [...combo.models].sort((a, b) => a.priority - b.priority);
+  const getProvider = (id: string) => providers.find((p) => p.id === id);
+
+  const fullSlug = `${combo.slug}/<model>`;
+
+  return (
+    <Card className="group transition-all hover:shadow-md hover:border-primary/40">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Workflow className="h-4 w-4 text-primary shrink-0" />
+              <CardTitle className="truncate">{combo.name}</CardTitle>
+            </div>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <code className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded font-mono">
+                {fullSlug}
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(combo.slug);
+                  toast.success("Slug copied");
+                }}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Copy slug"
+              >
+                <Copy className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+          <Switch
+            checked={combo.enabled}
+            onCheckedChange={(checked) => onToggle(combo.id, checked)}
+            className="scale-90 shrink-0"
+          />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Fallback chain visualization */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+              Fallback Chain
+            </p>
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+              {combo.models.length} model{combo.models.length !== 1 ? "s" : ""}
+            </Badge>
+          </div>
+          {combo.models.length === 0 ? (
+            <div className="text-xs text-muted-foreground py-3 text-center border rounded-md border-dashed">
+              No models in fallback chain
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {sortedModels.slice(0, 5).map((entry, i) => {
+                const provider = getProvider(entry.providerId);
+                return (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-muted/30 text-xs"
+                  >
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] w-5 h-5 flex items-center justify-center p-0 shrink-0 font-bold"
+                    >
+                      {entry.priority}
+                    </Badge>
+                    <BrandIcon prefix={provider?.prefix} size="xs" />
+                    <span className="truncate font-mono">{entry.model}</span>
+                    {provider && (
+                      <span className="text-muted-foreground text-[10px] ml-auto truncate">
+                        {provider.name}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              {sortedModels.length > 5 && (
+                <p className="text-[10px] text-muted-foreground text-center pt-1">
+                  + {sortedModels.length - 5} more model{sortedModels.length - 5 !== 1 ? "s" : ""}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-1 pt-2 border-t">
+          <Button size="sm" variant="ghost" className="flex-1" onClick={() => onEdit(combo)}>
+            <Pencil className="h-3.5 w-3.5 mr-1" />
+            Edit
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            onClick={() => onDelete(combo)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Loading Skeleton
+// ─────────────────────────────────────────────
+
+function CombosSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <div className="h-8 w-32 bg-muted rounded" />
+          <div className="h-4 w-64 bg-muted rounded" />
+        </div>
+        <div className="h-9 w-32 bg-muted rounded" />
+      </div>
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-20 bg-muted rounded-lg" />
+        ))}
+      </div>
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-48 bg-muted rounded-lg" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Main Combos Page
+// ─────────────────────────────────────────────
+
 export default function CombosPage() {
   const [combos, setCombos] = useState<Combo[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -46,20 +290,24 @@ export default function CombosPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [addModelsDialogOpen, setAddModelsDialogOpen] = useState(false);
   const [editingCombo, setEditingCombo] = useState<Combo | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Form state
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [comboModels, setComboModels] = useState<ComboModel[]>([]);
-  
-  // Temp state for add models dialog
+
+  // Add Models dialog
   const [tempSelectedModels, setTempSelectedModels] = useState<ComboModel[]>([]);
+  const [modelDialogSearch, setModelDialogSearch] = useState("");
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  // Delete confirmation
+  const [deleteTarget, setDeleteTarget] = useState<Combo | null>(null);
 
-  async function fetchData() {
+  // Drag state
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  const fetchData = useCallback(async () => {
     try {
       const [combosRes, providersRes] = await Promise.all([
         fetch("/api/combos"),
@@ -72,7 +320,11 @@ export default function CombosPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   function resetForm() {
     setName("");
@@ -80,6 +332,7 @@ export default function CombosPage() {
     setComboModels([]);
     setEditingCombo(null);
     setTempSelectedModels([]);
+    setModelDialogSearch("");
   }
 
   function openAddDialog() {
@@ -91,13 +344,13 @@ export default function CombosPage() {
     setEditingCombo(combo);
     setName(combo.name);
     setSlug(combo.slug);
-    setComboModels(combo.models);
+    setComboModels([...combo.models].sort((a, b) => a.priority - b.priority));
     setDialogOpen(true);
   }
 
   function openAddModelsDialog() {
-    // Initialize temp selection with current combo models
     setTempSelectedModels([...comboModels]);
+    setModelDialogSearch("");
     setAddModelsDialogOpen(true);
   }
 
@@ -105,60 +358,66 @@ export default function CombosPage() {
     const exists = tempSelectedModels.some(
       (m) => m.providerId === providerId && m.model === model
     );
-
     if (exists) {
-      // Remove from temp
       const updated = tempSelectedModels.filter(
         (m) => !(m.providerId === providerId && m.model === model)
       );
-      const reprioritized = updated.map((m, i) => ({ ...m, priority: i + 1 }));
-      setTempSelectedModels(reprioritized);
+      setTempSelectedModels(updated.map((m, i) => ({ ...m, priority: i + 1 })));
     } else {
-      // Add to temp
-      const newEntry: ComboModel = {
-        model,
-        providerId,
-        priority: tempSelectedModels.length + 1,
-      };
-      setTempSelectedModels([...tempSelectedModels, newEntry]);
+      setTempSelectedModels([
+        ...tempSelectedModels,
+        { model, providerId, priority: tempSelectedModels.length + 1 },
+      ]);
     }
   }
 
   function saveModelsFromDialog() {
     setComboModels(tempSelectedModels);
     setAddModelsDialogOpen(false);
+    toast.success(`${tempSelectedModels.length} model(s) selected`);
   }
 
   function removeModelFromCombo(index: number) {
     const updated = comboModels.filter((_, i) => i !== index);
-    const reprioritized = updated.map((m, i) => ({ ...m, priority: i + 1 }));
-    setComboModels(reprioritized);
+    setComboModels(updated.map((m, i) => ({ ...m, priority: i + 1 })));
   }
 
   function moveModel(index: number, direction: "up" | "down") {
     const newModels = [...comboModels];
     const targetIndex = direction === "up" ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= newModels.length) return;
-
     [newModels[index], newModels[targetIndex]] = [newModels[targetIndex], newModels[index]];
-    const reprioritized = newModels.map((m, i) => ({ ...m, priority: i + 1 }));
-    setComboModels(reprioritized);
+    setComboModels(newModels.map((m, i) => ({ ...m, priority: i + 1 })));
   }
 
-  function getProviderName(providerId: string): string {
-    return providers.find((p) => p.id === providerId)?.name || "Unknown";
+  // Drag-and-drop handlers
+  function handleDragStart(index: number) {
+    setDraggedIndex(index);
+  }
+  function handleDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+    const newModels = [...comboModels];
+    const [draggedItem] = newModels.splice(draggedIndex, 1);
+    newModels.splice(index, 0, draggedItem);
+    setComboModels(newModels.map((m, i) => ({ ...m, priority: i + 1 })));
+    setDraggedIndex(index);
+  }
+  function handleDragEnd() {
+    setDraggedIndex(null);
+  }
+
+  function getProvider(providerId: string): Provider | undefined {
+    return providers.find((p) => p.id === providerId);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-
     if (comboModels.length === 0) {
       toast.error("Add at least one model to the combo");
       return;
     }
-
     const payload = { name, slug, models: comboModels };
-
     try {
       if (editingCombo) {
         const res = await fetch(`/api/combos/${editingCombo.id}`, {
@@ -166,9 +425,8 @@ export default function CombosPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (res.ok) {
-          toast.success("Combo updated");
-        } else {
+        if (res.ok) toast.success("Combo updated");
+        else {
           const data = await res.json();
           toast.error(data.error || "Failed to update combo");
           return;
@@ -179,15 +437,13 @@ export default function CombosPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (res.ok) {
-          toast.success("Combo created");
-        } else {
+        if (res.ok) toast.success("Combo created");
+        else {
           const data = await res.json();
           toast.error(data.error || "Failed to create combo");
           return;
         }
       }
-
       setDialogOpen(false);
       resetForm();
       fetchData();
@@ -203,56 +459,104 @@ export default function CombosPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
-      fetchData();
+      setCombos((prev) => prev.map((c) => (c.id === id ? { ...c, enabled } : c)));
+      toast.success(enabled ? "Combo enabled" : "Combo disabled");
     } catch {
       toast.error("Failed to update combo");
     }
   }
 
-  async function deleteCombo(id: string) {
-    if (!confirm("Are you sure you want to delete this combo?")) return;
-
+  async function confirmDelete() {
+    if (!deleteTarget) return;
     try {
-      const res = await fetch(`/api/combos/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/combos/${deleteTarget.id}`, { method: "DELETE" });
       if (res.ok) {
         toast.success("Combo deleted");
         fetchData();
+      } else {
+        toast.error("Failed to delete combo");
       }
     } catch {
       toast.error("Failed to delete combo");
+    } finally {
+      setDeleteTarget(null);
     }
   }
 
-  if (loading) {
-    return <div className="flex items-center justify-center py-24 text-muted-foreground gap-2"><div className="w-4 h-4 rounded-full border-2 border-muted-foreground border-t-transparent animate-spin" /><span className="text-sm">Loading combos...</span></div>;
-  }
+  // ─── Derived data ───
+  const totalActive = combos.filter((c) => c.enabled).length;
+  const totalModelsInCombos = combos.reduce((sum, c) => sum + c.models.length, 0);
+  const avgChainLength =
+    combos.length > 0 ? Math.round(totalModelsInCombos / combos.length) : 0;
+
+  const filteredCombos = useMemo(() => {
+    if (!searchQuery.trim()) return combos;
+    const q = searchQuery.toLowerCase();
+    return combos.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.slug.toLowerCase().includes(q) ||
+        c.models.some((m) => m.model.toLowerCase().includes(q))
+    );
+  }, [combos, searchQuery]);
+
+  // Filter providers/models in Add Models dialog
+  const filteredProvidersForDialog = useMemo(() => {
+    const enabled = providers.filter((p) => p.enabled && p.models.length > 0);
+    if (!modelDialogSearch.trim()) return enabled;
+    const q = modelDialogSearch.toLowerCase();
+    return enabled
+      .map((p) => ({
+        ...p,
+        models: p.models.filter((m) => m.toLowerCase().includes(q)),
+      }))
+      .filter((p) => p.models.length > 0 || p.name.toLowerCase().includes(q));
+  }, [providers, modelDialogSearch]);
+
+  if (loading) return <CombosSkeleton />;
+
+  const enabledProviders = providers.filter((p) => p.enabled);
+  const hasActiveProviders = enabledProviders.length > 0;
+  const slugPreview = slug || "your-slug";
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* ═══ Header ═══ */}
+      <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Combos</h2>
           <p className="text-muted-foreground mt-1">
-            Create model fallback chains from multiple providers
+            Create model fallback chains with automatic failover across providers
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger render={<Button onClick={openAddDialog} />}>
-            Create Combo
-          </DialogTrigger>
+          <DialogTrigger
+            render={
+              <Button onClick={openAddDialog} disabled={!hasActiveProviders}>
+                <Plus className="h-4 w-4 mr-1" />
+                Create Combo
+              </Button>
+            }
+          />
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
             <DialogHeader>
-              <DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                <Workflow className="h-5 w-5" />
                 {editingCombo ? "Edit Combo" : "Create Combo"}
               </DialogTitle>
               <DialogDescription>
-                Create fallback chains with multiple models from different providers.
+                Combos let you chain multiple models with automatic failover. If the first
+                model fails, the next is tried automatically.
               </DialogDescription>
             </DialogHeader>
-            <form onSubmit={handleSubmit} className="flex-1 overflow-hidden flex flex-col gap-4">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="combo-name">Name</Label>
+            <form
+              onSubmit={handleSubmit}
+              className="flex-1 overflow-hidden flex flex-col gap-4"
+            >
+              {/* Name + Slug */}
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="combo-name">Display Name</Label>
                   <Input
                     id="combo-name"
                     placeholder="e.g. Main Fallback"
@@ -261,89 +565,136 @@ export default function CombosPage() {
                     required
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="combo-slug">
-                    Slug (used in model name: slug/model)
-                  </Label>
+                <div className="space-y-1.5">
+                  <Label htmlFor="combo-slug">Slug</Label>
                   <Input
                     id="combo-slug"
                     placeholder="e.g. main"
                     value={slug}
-                    onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))}
+                    onChange={(e) =>
+                      setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
+                    }
                     required
                   />
                 </div>
               </div>
 
+              {/* Slug preview */}
+              <div className="rounded-md bg-muted/30 border px-3 py-2 text-xs space-y-1">
+                <p className="text-muted-foreground">Use this combo in API requests:</p>
+                <code className="font-mono text-foreground/80">
+                  &quot;model&quot;: &quot;{slugPreview}/&lt;any-model-name&gt;&quot;
+                </code>
+              </div>
+
               {/* Selected Models (Fallback Order) */}
-              <div className="space-y-2">
+              <div className="flex-1 overflow-hidden flex flex-col space-y-2 min-h-0">
                 <div className="flex items-center justify-between">
-                  <Label>Fallback Order ({comboModels.length} models)</Label>
+                  <Label className="flex items-center gap-2">
+                    Fallback Order
+                    <Badge variant="secondary" className="text-[10px]">
+                      {comboModels.length} model{comboModels.length !== 1 ? "s" : ""}
+                    </Badge>
+                  </Label>
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
                     onClick={openAddModelsDialog}
                   >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
                     Add Models
                   </Button>
                 </div>
+                {comboModels.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Drag to reorder. Higher priority = tried first.
+                  </p>
+                )}
                 {comboModels.length > 0 ? (
-                  <div className="space-y-1 max-h-64 overflow-y-auto border rounded-md p-3">
-                    {comboModels.map((entry, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-2 rounded border px-3 py-2 text-sm bg-muted/30"
-                      >
-                        <Badge variant="outline" className="text-xs w-5 h-5 flex items-center justify-center p-0">
-                          {entry.priority}
-                        </Badge>
-                        <span className="flex-1">
-                          {entry.model}{" "}
-                          <span className="text-muted-foreground text-xs">
-                            ({getProviderName(entry.providerId)})
+                  <div className="flex-1 overflow-y-auto border rounded-md p-2 space-y-1.5 min-h-0">
+                    {comboModels.map((entry, index) => {
+                      const provider = getProvider(entry.providerId);
+                      const isDragging = draggedIndex === index;
+                      return (
+                        <div
+                          key={`${entry.providerId}-${entry.model}-${index}`}
+                          draggable
+                          onDragStart={() => handleDragStart(index)}
+                          onDragOver={(e) => handleDragOver(e, index)}
+                          onDragEnd={handleDragEnd}
+                          className={`flex items-center gap-2 rounded-md border px-2 py-2 text-sm bg-background transition-all ${
+                            isDragging
+                              ? "opacity-50 border-primary"
+                              : "hover:bg-muted/30"
+                          }`}
+                        >
+                          <GripVertical className="h-4 w-4 text-muted-foreground shrink-0 cursor-grab active:cursor-grabbing" />
+                          <Badge
+                            variant="default"
+                            className="text-[10px] w-5 h-5 flex items-center justify-center p-0 shrink-0 font-bold"
+                          >
+                            {entry.priority}
+                          </Badge>
+                          <BrandIcon prefix={provider?.prefix} size="xs" />
+                          <span className="font-mono text-xs truncate flex-1">
+                            {entry.model}
                           </span>
-                        </span>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => moveModel(index, "up")}
-                          disabled={index === 0}
-                          className="h-6 w-6 p-0"
-                        >
-                          ↑
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => moveModel(index, "down")}
-                          disabled={index === comboModels.length - 1}
-                          className="h-6 w-6 p-0"
-                        >
-                          ↓
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive h-6 w-6 p-0"
-                          onClick={() => removeModelFromCombo(index)}
-                        >
-                          ×
-                        </Button>
-                      </div>
-                    ))}
+                          <span className="text-[10px] text-muted-foreground hidden sm:inline truncate max-w-[100px]">
+                            {provider?.name || "Unknown"}
+                          </span>
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => moveModel(index, "up")}
+                              disabled={index === 0}
+                              className="h-6 w-6 p-0"
+                              title="Move up"
+                            >
+                              <ArrowUp className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => moveModel(index, "down")}
+                              disabled={index === comboModels.length - 1}
+                              className="h-6 w-6 p-0"
+                              title="Move down"
+                            >
+                              <ArrowDown className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive h-6 w-6 p-0"
+                              onClick={() => removeModelFromCombo(index)}
+                              title="Remove"
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
-                  <div className="border rounded-md p-8 text-center text-sm text-muted-foreground">
-                    No models added yet. Click "Add Models" to select models.
+                  <div className="flex-1 border-2 border-dashed rounded-md p-8 text-center space-y-2 flex flex-col items-center justify-center min-h-[150px]">
+                    <Box className="h-8 w-8 text-muted-foreground" />
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">No models yet</p>
+                      <p className="text-xs text-muted-foreground">
+                        Click <strong>Add Models</strong> to start building your fallback chain
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="flex justify-end gap-2 pt-4 border-t">
+              <div className="flex justify-end gap-2 pt-3 border-t">
                 <Button
                   type="button"
                   variant="outline"
@@ -351,8 +702,8 @@ export default function CombosPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit">
-                  {editingCombo ? "Update" : "Create"}
+                <Button type="submit" disabled={comboModels.length === 0}>
+                  {editingCombo ? "Update Combo" : "Create Combo"}
                 </Button>
               </div>
             </form>
@@ -365,53 +716,125 @@ export default function CombosPage() {
             <DialogHeader>
               <DialogTitle>Select Models</DialogTitle>
               <DialogDescription>
-                Choose models to add to your combo. Selected models will be added in the order you check them.
+                Choose which models should be in this combo. Selection order determines
+                priority — first selected is tried first.
               </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 overflow-hidden flex flex-col gap-4">
-              {/* Selected count */}
-              {tempSelectedModels.length > 0 && (
-                <div className="text-sm text-muted-foreground">
-                  {tempSelectedModels.length} model{tempSelectedModels.length > 1 ? "s" : ""} selected
-                </div>
-              )}
+            <div className="flex-1 overflow-hidden flex flex-col gap-3">
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Search by model or provider..."
+                  value={modelDialogSearch}
+                  onChange={(e) => setModelDialogSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
 
-              {/* Available Models with checkboxes */}
-              <div className="flex-1 overflow-y-auto border rounded-md p-3 space-y-3">
-                {providers.map((provider) => (
-                  <div key={provider.id} className="space-y-1">
-                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      {provider.name}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {provider.models.map((model) => {
-                        const isSelected = tempSelectedModels.some(
-                          (m) => m.providerId === provider.id && m.model === model
-                        );
-                        return (
-                          <label
-                            key={`${provider.id}/${model}`}
-                            className="flex items-center gap-2 p-2 rounded-md hover:bg-muted/50 cursor-pointer"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => toggleModelInTemp(provider.id, model)}
-                              className="rounded"
-                            />
-                            <span className="text-sm flex-1 truncate" title={model}>
-                              {model}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
+              {/* Selected count + clear */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  <strong className="text-foreground">{tempSelectedModels.length}</strong>{" "}
+                  selected
+                </span>
+                {tempSelectedModels.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setTempSelectedModels([])}
+                    className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+
+              {/* Model list grouped by provider */}
+              <div className="flex-1 overflow-y-auto border rounded-md p-3 space-y-3 min-h-0">
+                {filteredProvidersForDialog.length === 0 ? (
+                  <div className="py-8 text-center space-y-2">
+                    {modelDialogSearch ? (
+                      <>
+                        <Search className="h-8 w-8 text-muted-foreground mx-auto" />
+                        <p className="text-sm text-muted-foreground">
+                          No models match &quot;{modelDialogSearch}&quot;
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No active providers with models. Add and enable providers first.
+                      </p>
+                    )}
                   </div>
-                ))}
-                {providers.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    No providers available. Add providers first.
-                  </p>
+                ) : (
+                  filteredProvidersForDialog.map((provider) => {
+                    const providerSelectedCount = tempSelectedModels.filter(
+                      (m) => m.providerId === provider.id
+                    ).length;
+                    return (
+                      <div key={provider.id} className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <BrandIcon prefix={provider.prefix} size="xs" />
+                          <span className="text-xs font-semibold uppercase tracking-wide">
+                            {provider.name}
+                          </span>
+                          {providerSelectedCount > 0 && (
+                            <Badge
+                              variant="default"
+                              className="text-[9px] px-1.5 py-0 h-4"
+                            >
+                              {providerSelectedCount}
+                            </Badge>
+                          )}
+                          <span className="text-[10px] text-muted-foreground ml-auto">
+                            {provider.models.length} model
+                            {provider.models.length !== 1 ? "s" : ""}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {provider.models.map((model) => {
+                            const selectedEntry = tempSelectedModels.find(
+                              (m) => m.providerId === provider.id && m.model === model
+                            );
+                            const isSelected = !!selectedEntry;
+                            return (
+                              <label
+                                key={`${provider.id}/${model}`}
+                                className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                                  isSelected
+                                    ? "bg-primary/10 border border-primary/30"
+                                    : "hover:bg-muted/50 border border-transparent"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() =>
+                                    toggleModelInTemp(provider.id, model)
+                                  }
+                                  className="rounded shrink-0"
+                                />
+                                <span
+                                  className="text-xs flex-1 truncate font-mono"
+                                  title={model}
+                                >
+                                  {model}
+                                </span>
+                                {isSelected && (
+                                  <Badge
+                                    variant="default"
+                                    className="text-[9px] w-4 h-4 flex items-center justify-center p-0 shrink-0"
+                                  >
+                                    {selectedEntry.priority}
+                                  </Badge>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -424,80 +847,173 @@ export default function CombosPage() {
                 Cancel
               </Button>
               <Button type="button" onClick={saveModelsFromDialog}>
-                Save Selection
+                Save Selection ({tempSelectedModels.length})
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+                Delete Combo
+              </DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete{" "}
+                <strong className="text-foreground">{deleteTarget?.name}</strong>? This
+                will remove the combo and any API requests using its slug will fail.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" onClick={confirmDelete}>
+                Delete Combo
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Combo List */}
-      {combos.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">
-              No combos created yet. Click &quot;Create Combo&quot; to set up fallback chains.
-            </p>
+      {/* ═══ Active providers warning ═══ */}
+      {!hasActiveProviders && (
+        <Card className="border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20">
+          <CardContent>
+            <div className="flex items-start gap-3">
+              <AlertCircle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">No active providers</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  You need at least one active provider with models to create combos.{" "}
+                  <a
+                    href="/dashboard/providers"
+                    className="text-primary hover:underline font-medium"
+                  >
+                    Manage providers →
+                  </a>
+                </p>
+              </div>
+            </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* ═══ Stats Overview ═══ */}
+      {combos.length > 0 && (
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            icon={Layers}
+            label="Total Combos"
+            value={combos.length}
+            hint={`${totalActive} active`}
+          />
+          <StatCard
+            icon={CheckCircle2}
+            label="Active"
+            value={totalActive}
+            hint={
+              totalActive === combos.length
+                ? "All enabled"
+                : `${combos.length - totalActive} disabled`
+            }
+            accent={totalActive > 0 ? "success" : "default"}
+          />
+          <StatCard
+            icon={Box}
+            label="Total Models"
+            value={totalModelsInCombos}
+            hint="Across all chains"
+          />
+          <StatCard
+            icon={Workflow}
+            label="Avg Chain Length"
+            value={avgChainLength}
+            hint="Models per combo"
+          />
+        </div>
+      )}
+
+      {/* ═══ Search Bar ═══ */}
+      {combos.length > 0 && (
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Search combos by name, slug, or model..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ═══ Combo List ═══ */}
+      {combos.length === 0 ? (
+        <Card className="border-dashed border-2">
+          <CardContent>
+            <div className="py-12 text-center space-y-4">
+              <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+                <Workflow className="h-8 w-8 text-primary" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-semibold">No combos yet</h3>
+                <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                  Combos let you chain multiple models with automatic failover. If your
+                  primary model goes down, requests automatically route to backups.
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <Button onClick={openAddDialog} disabled={!hasActiveProviders}>
+                  <Plus className="h-4 w-4 mr-1" />
+                  Create Your First Combo
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : filteredCombos.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8 border rounded-md border-dashed">
+          No combos match &quot;{searchQuery}&quot;
+        </p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {combos.map((combo) => (
-            <Card key={combo.id}>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <div>
-                  <CardTitle className="text-base font-medium">
-                    {combo.name}
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground font-mono mt-1">
-                    {combo.slug}/&lt;model&gt;
-                  </p>
-                </div>
-                <Switch
-                  checked={combo.enabled}
-                  onCheckedChange={(checked) => toggleCombo(combo.id, checked)}
-                />
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">
-                    Fallback Chain ({combo.models.length} models)
-                  </p>
-                  <div className="space-y-1">
-                    {combo.models
-                      .sort((a, b) => a.priority - b.priority)
-                      .map((entry, i) => (
-                        <div key={i} className="flex items-center gap-2 text-sm">
-                          <Badge variant="outline" className="text-xs w-5 h-5 flex items-center justify-center p-0">
-                            {entry.priority}
-                          </Badge>
-                          <span>{entry.model}</span>
-                          <span className="text-muted-foreground text-xs">
-                            ({getProviderName(entry.providerId)})
-                          </span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openEditDialog(combo)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => deleteCombo(combo.id)}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredCombos.map((combo) => (
+            <ComboCard
+              key={combo.id}
+              combo={combo}
+              providers={providers}
+              onToggle={toggleCombo}
+              onEdit={openEditDialog}
+              onDelete={(c) => setDeleteTarget(c)}
+            />
           ))}
+        </div>
+      )}
+
+      {/* ═══ Help Footer ═══ */}
+      {combos.length > 0 && (
+        <div className="border-t pt-4 mt-8">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <ArrowRight className="h-3 w-3" />
+            <span>
+              Use a combo by sending requests with{" "}
+              <code className="bg-muted px-1.5 py-0.5 rounded">
+                slug/&lt;model-name&gt;
+              </code>{" "}
+              as the model field
+            </span>
+          </div>
         </div>
       )}
     </div>

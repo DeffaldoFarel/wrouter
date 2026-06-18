@@ -128,7 +128,7 @@ export function initializeDatabase() {
     { key: "port", value: "20128" },
     { key: "rtk_enabled", value: "false" },
     { key: "caveman_enabled", value: "false" },
-    { key: "log_retention_days", value: "30" },
+    { key: "log_retention_days", value: "60" },
   ];
 
   const insertSetting = sqlite.prepare(

@@ -106,6 +106,159 @@ describe('validateChatRequest()', () => {
     expect(result.errors!.some(e => /100000/i.test(e))).toBe(true);
   });
 
+  // ── multimodal / vision content ────────────────────────
+  it('accepts multimodal content with text and image_url', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is in this image?' },
+          { type: 'image_url', image_url: { url: 'https://example.com/img.jpg' } },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts multimodal content with base64 image', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe this' },
+          { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/4AAQ...' } },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts image_url with detail option', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe' },
+          { type: 'image_url', image_url: { url: 'https://example.com/img.jpg', detail: 'high' } },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts multiple images in one message', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Compare these' },
+          { type: 'image_url', image_url: { url: 'https://example.com/a.jpg' } },
+          { type: 'image_url', image_url: { url: 'https://example.com/b.jpg' } },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts Anthropic-style tool_result blocks in content array', () => {
+    const result = validateChatRequest({
+      model: 'claude-3',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'toolu_abc', content: 'result text' },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts unknown content part types (forward compatibility)', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Hello' },
+          { type: 'future_format', data: 'something' },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('fails when content array is empty', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: [] }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors!.some(e => /at least 1/i.test(e))).toBe(true);
+  });
+
+  it('fails when content array has more than 50 items', () => {
+    const parts = Array.from({ length: 51 }, () => ({ type: 'text', text: 'hi' }));
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: parts }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors!.some(e => /max 50/i.test(e))).toBe(true);
+  });
+
+  it('fails when image_url is missing url', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: {} },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors!.some(e => /image_url\.url.*string/i.test(e))).toBe(true);
+  });
+
+  it('fails when image_url detail is invalid', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: 'https://example.com/img.jpg', detail: 'ultra' } },
+        ],
+      }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors!.some(e => /detail.*low.*high.*auto/i.test(e))).toBe(true);
+  });
+
+  it('fails when content part is missing type', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [{ text: 'no type field' }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors!.some(e => /type.*required/i.test(e))).toBe(true);
+  });
+
+  it('fails when content is a number (not string or array)', () => {
+    const result = validateChatRequest({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 42 }],
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors!.some(e => /string or an array/i.test(e))).toBe(true);
+  });
+
   // ── temperature ───────────────────────────────────────
   it('fails when temperature is negative', () => {
     const result = validateChatRequest({ ...validRequest, temperature: -0.1 });

@@ -11,12 +11,15 @@ import {
   Position,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { Zap, Server, Activity } from "lucide-react";
+import { getProviderIcon } from "@/components/provider-icons";
 
 interface CanvasProvider {
   id: string;
   name: string;
   enabled: boolean;
   active: boolean;
+  prefix?: string;
 }
 
 interface ProviderCanvasProps {
@@ -24,68 +27,149 @@ interface ProviderCanvasProps {
   activeJobs?: number;
 }
 
-// Center node (WRouter) — single centered handle, edges use type="straight"
+// ─────────────────────────────────────────────
+//  WRouter Center Node
+// ─────────────────────────────────────────────
+
 function WRouterNode({ data }: { data: { activeJobs: number } }) {
   const jobs = data.activeJobs ?? 0;
+  const hasActive = jobs > 0;
+
   return (
-    <div
-      className="relative flex items-center gap-2 px-5 py-3 rounded-xl border-2 border-primary bg-primary text-primary-foreground font-bold text-base shadow-lg"
-      style={{ minWidth: 120 }}
-    >
-      {/* Single invisible handle at center — React Flow StraightEdge will draw from node center */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="center"
-        style={{ opacity: 0, top: "50%", left: "50%", transform: "translate(-50%,-50%)", right: "auto", bottom: "auto" }}
-      />
-      <span className="flex-1 text-center">WRouter</span>
-      {jobs > 0 && (
-        <span
-          className="flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full text-[10px] font-bold bg-white/20 text-primary-foreground animate-pulse"
-          title={`${jobs} active job${jobs !== 1 ? "s" : ""}`}
-        >
-          {jobs}
-        </span>
+    <div className="relative">
+      {/* Outer glow ring when active */}
+      {hasActive && (
+        <div className="absolute inset-0 -m-3 rounded-2xl bg-primary/25 blur-xl animate-pulse" />
       )}
+
+      {/* Main node */}
+      <div
+        className="relative flex items-center gap-3 px-6 py-4 rounded-2xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold shadow-2xl ring-2 ring-primary/40 ring-offset-2 ring-offset-background"
+        style={{ minWidth: 200 }}
+      >
+        {/* Two source handles for left/right side providers */}
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="right"
+          style={{
+            opacity: 0,
+            top: "50%",
+            right: 0,
+            transform: "translate(50%,-50%)",
+          }}
+        />
+        <Handle
+          type="source"
+          position={Position.Left}
+          id="left"
+          style={{
+            opacity: 0,
+            top: "50%",
+            left: 0,
+            transform: "translate(-50%,-50%)",
+          }}
+        />
+
+        <div className="flex items-center justify-center h-11 w-11 rounded-xl bg-white/20 shrink-0">
+          <Zap className="h-6 w-6" />
+        </div>
+
+        <div className="flex-1 text-left">
+          <div className="text-base font-bold leading-tight">WRouter</div>
+          {hasActive ? (
+            <div className="text-xs opacity-90 flex items-center gap-1 mt-0.5">
+              <Activity className="h-3 w-3 animate-pulse" />
+              {jobs} active job{jobs !== 1 ? "s" : ""}
+            </div>
+          ) : (
+            <div className="text-xs opacity-70 mt-0.5">Idle</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-// Provider node — single invisible centered handle
+// ─────────────────────────────────────────────
+//  Provider Node
+// ─────────────────────────────────────────────
+
 function ProviderNode({
   data,
 }: {
-  data: { label: string; enabled: boolean; active: boolean };
+  data: { label: string; enabled: boolean; active: boolean; prefix?: string; side: "left" | "right" };
 }) {
+  const Icon = data.prefix ? getProviderIcon(data.prefix) : null;
+
+  const stateClass = data.active
+    ? "border-green-500 bg-card shadow-green-500/30 shadow-xl"
+    : data.enabled
+    ? "border-border bg-card hover:border-primary/40 shadow-md"
+    : "border-border bg-muted/40 opacity-60";
+
+  const textClass = data.active
+    ? "text-green-700 dark:text-green-300"
+    : data.enabled
+    ? "text-foreground"
+    : "text-muted-foreground";
+
   return (
-    <div
-      className={`px-4 py-2.5 rounded-lg border text-sm font-medium shadow transition-all ${
-        data.active
-          ? "border-green-500 bg-card text-green-700 dark:text-green-300 shadow-green-500/20 shadow-md"
-          : data.enabled
-          ? "border-border bg-card text-foreground"
-          : "border-border bg-muted text-muted-foreground opacity-50"
-      }`}
-      style={{ minWidth: 110, textAlign: "center" }}
-    >
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="center"
-        style={{ opacity: 0, top: "50%", left: "50%", transform: "translate(-50%,-50%)", right: "auto", bottom: "auto" }}
-      />
-      <div className="flex items-center justify-center gap-1.5">
-        <span
-          className={`inline-block w-1.5 h-1.5 rounded-full ${
-            data.active
-              ? "bg-green-500 animate-pulse"
-              : data.enabled
-              ? "bg-muted-foreground/40"
-              : "bg-muted-foreground/20"
-          }`}
+    <div className="relative">
+      {/* Glow ring when active */}
+      {data.active && (
+        <div className="absolute inset-0 -m-2 rounded-2xl bg-green-500/25 blur-xl animate-pulse" />
+      )}
+
+      <div
+        className={`relative px-5 py-4 rounded-2xl border-2 transition-all ${stateClass}`}
+        style={{ minWidth: 220 }}
+      >
+        {/* Handle on the inward side (toward WRouter center) */}
+        <Handle
+          type="target"
+          position={data.side === "right" ? Position.Left : Position.Right}
+          id={data.side === "right" ? "left" : "right"}
+          style={{
+            opacity: 0,
+            top: "50%",
+            [data.side === "right" ? "left" : "right"]: 0,
+            transform: data.side === "right" ? "translate(-50%,-50%)" : "translate(50%,-50%)",
+          }}
         />
-        {data.label}
+
+        <div className="flex items-center gap-3">
+          {/* Brand icon or fallback */}
+          {Icon ? (
+            <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-muted/50 border shrink-0">
+              <Icon className="h-7 w-7" />
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-muted shrink-0">
+              <Server className="h-6 w-6 text-muted-foreground" />
+            </div>
+          )}
+
+          <div className="flex-1 min-w-0">
+            <div className={`text-sm font-semibold leading-tight truncate ${textClass}`}>
+              {data.label}
+            </div>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  data.active
+                    ? "bg-green-500 animate-pulse"
+                    : data.enabled
+                    ? "bg-muted-foreground/40"
+                    : "bg-muted-foreground/20"
+                }`}
+              />
+              <span className="text-xs text-muted-foreground">
+                {data.active ? "Active" : data.enabled ? "Online" : "Offline"}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -96,15 +180,20 @@ const nodeTypes = {
   provider: ProviderNode,
 };
 
+// ─────────────────────────────────────────────
+//  Graph Builder
+// ─────────────────────────────────────────────
+
 function buildGraph(
   providers: CanvasProvider[],
   activeJobs: number,
-  dotColor: string,
   edgeColor: string,
+  activeEdgeColor: string
 ): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
+  // WRouter at center
   nodes.push({
     id: "wrouter",
     type: "wrouter",
@@ -115,75 +204,159 @@ function buildGraph(
   });
 
   const count = providers.length;
-  const radius = count <= 4 ? 200 : count <= 8 ? 250 : 300;
+  if (count === 0) return { nodes, edges };
 
+  // Split providers into left & right columns (alternating for visual balance)
+  // Even index → right side, odd index → left side
+  const rightColumn: { provider: CanvasProvider; index: number }[] = [];
+  const leftColumn: { provider: CanvasProvider; index: number }[] = [];
   providers.forEach((p, i) => {
-    const angleDeg = -90 + (360 / count) * i;
-    const angleRad = (angleDeg * Math.PI) / 180;
-    const x = radius * Math.cos(angleRad);
-    const y = radius * Math.sin(angleRad);
+    if (i % 2 === 0) rightColumn.push({ provider: p, index: i });
+    else leftColumn.push({ provider: p, index: i });
+  });
+
+  // Layout constants
+  const HORIZONTAL_DISTANCE = 420; // distance from WRouter to provider column
+  const VERTICAL_SPACING = 130;    // vertical gap between providers in same column
+  const STAGGER_OFFSET = 40;       // horizontal stagger to make bezier curves visible
+
+  // Place right column
+  rightColumn.forEach(({ provider, index }, i) => {
+    const total = rightColumn.length;
+    // Center the column vertically around y=0
+    const y = (i - (total - 1) / 2) * VERTICAL_SPACING;
+    // Stagger: alternate between near and far X positions
+    const stagger = i % 2 === 0 ? 0 : STAGGER_OFFSET;
+    const x = HORIZONTAL_DISTANCE + stagger;
 
     nodes.push({
-      id: p.id,
+      id: provider.id,
       type: "provider",
       position: { x, y },
-      data: { label: p.name, enabled: p.enabled, active: p.active },
+      data: {
+        label: provider.name,
+        enabled: provider.enabled,
+        active: provider.active,
+        prefix: provider.prefix,
+        side: "right",
+      },
       draggable: false,
       selectable: false,
     });
 
     edges.push({
-      id: `e-wrouter-${p.id}`,
+      id: `e-wrouter-${provider.id}`,
       source: "wrouter",
-      sourceHandle: "center",
-      target: p.id,
-      targetHandle: "center",
-      type: "straight",
-      animated: p.active,
+      sourceHandle: "right",
+      target: provider.id,
+      targetHandle: "left",
+      type: "default",
+      animated: false,
+      className: provider.active ? "wrouter-edge-active" : "wrouter-edge-idle",
       style: {
-        stroke: p.active ? "#22c55e" : edgeColor,
-        strokeWidth: p.active ? 2 : 1,
-        strokeDasharray: p.active ? undefined : "5 5",
-        opacity: p.active ? 1 : 0.3,
+        stroke: provider.active ? activeEdgeColor : edgeColor,
+        strokeWidth: 3,
+        strokeDasharray: provider.active ? "14 10" : provider.enabled ? "10 8" : "6 6",
+        strokeLinecap: "butt",
+        opacity: provider.active ? 1 : provider.enabled ? 0.7 : 0.35,
       },
     });
+    // Suppress unused-var warning for `index`
+    void index;
+  });
+
+  // Place left column
+  leftColumn.forEach(({ provider, index }, i) => {
+    const total = leftColumn.length;
+    const y = (i - (total - 1) / 2) * VERTICAL_SPACING;
+    const stagger = i % 2 === 0 ? 0 : STAGGER_OFFSET;
+    const x = -HORIZONTAL_DISTANCE - stagger;
+
+    nodes.push({
+      id: provider.id,
+      type: "provider",
+      position: { x, y },
+      data: {
+        label: provider.name,
+        enabled: provider.enabled,
+        active: provider.active,
+        prefix: provider.prefix,
+        side: "left",
+      },
+      draggable: false,
+      selectable: false,
+    });
+
+    edges.push({
+      id: `e-wrouter-${provider.id}`,
+      source: "wrouter",
+      sourceHandle: "left",
+      target: provider.id,
+      targetHandle: "right",
+      type: "default",
+      animated: false,
+      className: provider.active ? "wrouter-edge-active" : "wrouter-edge-idle",
+      style: {
+        stroke: provider.active ? activeEdgeColor : edgeColor,
+        strokeWidth: 3,
+        strokeDasharray: provider.active ? "14 10" : provider.enabled ? "10 8" : "6 6",
+        strokeLinecap: "butt",
+        opacity: provider.active ? 1 : provider.enabled ? 0.7 : 0.35,
+      },
+    });
+    void index;
   });
 
   return { nodes, edges };
 }
 
-// Read a computed CSS custom property from the document root as an rgb/hex value
+// Read computed CSS variable
 function resolveColor(cssVar: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
   const raw = getComputedStyle(document.documentElement)
     .getPropertyValue(cssVar)
     .trim();
   if (!raw) return fallback;
-  // Tailwind v4 returns space-separated channels like "220 13% 91%"
-  // Wrap into hsl() for SVG
   return raw.includes("%") ? `hsl(${raw})` : raw;
 }
 
-export function ProviderCanvas({
-  providers,
-  activeJobs = 0,
-}: ProviderCanvasProps) {
-  const [dotColor, setDotColor] = useState("#555");
-  const [edgeColor, setEdgeColor] = useState("#555");
+// ─────────────────────────────────────────────
+//  Main Canvas
+// ─────────────────────────────────────────────
+
+export function ProviderCanvas({ providers, activeJobs = 0 }: ProviderCanvasProps) {
+  const [edgeColor, setEdgeColor] = useState("#94a3b8");
+  const [activeEdgeColor, setActiveEdgeColor] = useState("#22c55e");
+  const [bgDotColor, setBgDotColor] = useState("#3a3a3a");
+  const [isDark, setIsDark] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Resolve theme colors and watch for dark/light mode changes
   useEffect(() => {
     function updateColors() {
-      const dot = resolveColor("--border", "#555");
-      const edge = resolveColor("--border", "#555");
-      setDotColor(dot);
-      setEdgeColor(edge);
+      const dark = document.documentElement.classList.contains("dark");
+      setIsDark(dark);
+
+      // Resolve foreground color for edges
+      const probe = document.createElement("span");
+      probe.style.cssText = "position:absolute;pointer-events:none;opacity:0;";
+      probe.className = "text-muted-foreground";
+      document.body.appendChild(probe);
+      const fg = getComputedStyle(probe).color;
+      document.body.removeChild(probe);
+
+      // Edge color: muted-foreground at lower opacity in dark, slate-400 in light
+      setEdgeColor(fg || (dark ? "#64748b" : "#94a3b8"));
+
+      // Active edge color: bright green-500 matching legend dot in BOTH themes
+      setActiveEdgeColor("#22c55e");
+
+      // Background dot color
+      const dot = resolveColor("--border", dark ? "#3a3a3a" : "#e5e7eb");
+      setBgDotColor(dot);
     }
 
     updateColors();
 
-    // Watch for theme changes on <html> class attribute
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.attributeName === "class") {
@@ -198,28 +371,52 @@ export function ProviderCanvas({
   }, []);
 
   const [nodes, setNodes] = useState<Node[]>(
-    () => buildGraph(providers, activeJobs, dotColor, edgeColor).nodes
+    () => buildGraph(providers, activeJobs, edgeColor, activeEdgeColor).nodes
   );
   const [edges, setEdges] = useState<Edge[]>(
-    () => buildGraph(providers, activeJobs, dotColor, edgeColor).edges
+    () => buildGraph(providers, activeJobs, edgeColor, activeEdgeColor).edges
   );
 
   useEffect(() => {
-    const { nodes: n, edges: e } = buildGraph(providers, activeJobs, dotColor, edgeColor);
+    const { nodes: n, edges: e } = buildGraph(
+      providers,
+      activeJobs,
+      edgeColor,
+      activeEdgeColor
+    );
     setNodes(n);
     setEdges(e);
-  }, [providers, activeJobs, dotColor, edgeColor]);
+  }, [providers, activeJobs, edgeColor, activeEdgeColor]);
 
   if (providers.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        No providers configured yet.
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm gap-3 p-6">
+        <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+          <Server className="h-5 w-5 opacity-50" />
+        </div>
+        <div className="text-center space-y-1">
+          <p className="text-sm font-medium">No providers configured</p>
+          <p className="text-xs">
+            Add a provider to see the connection map
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%" }}>
+    <div
+      ref={containerRef}
+      className="relative w-full h-full"
+      style={{
+        width: "100%",
+        height: "100%",
+        // Subtle radial gradient background for depth
+        background: isDark
+          ? "radial-gradient(circle at center, rgba(99,102,241,0.03), transparent 70%)"
+          : "radial-gradient(circle at center, rgba(99,102,241,0.04), transparent 70%)",
+      }}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -239,11 +436,28 @@ export function ProviderCanvas({
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={20}
-          size={2}
-          color="#3a3a3a"
+          gap={24}
+          size={1.5}
+          color={bgDotColor}
+          style={{ opacity: 0.5 }}
         />
       </ReactFlow>
+
+      {/* Legend overlay */}
+      <div className="absolute bottom-3 right-3 flex items-center gap-3 px-3 py-1.5 rounded-md bg-background/80 backdrop-blur-sm border text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          Active
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-muted-foreground/40" />
+          Online
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-muted-foreground/20" />
+          Offline
+        </div>
+      </div>
     </div>
   );
 }

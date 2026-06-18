@@ -128,3 +128,36 @@
     @apply font-sans;
   }
 }
+/* ─── Provider Canvas Edge Animations ─── */
+/* Marching ants for active connections — smooth seamless loop */
+.wrouter-edge-active .react-flow__edge-path {
+  /* Override any inherited React Flow animation */
+  animation: wrouter-march 0.6s linear infinite !important;
+  will-change: stroke-dashoffset;
+}
+
+@keyframes wrouter-march {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    /* Exactly one full dash cycle: 14 + 10 = 24 */
+    stroke-dashoffset: -24;
+  }
+}
+
+/* Subtle slow drift for idle (online but no active jobs) */
+.wrouter-edge-idle .react-flow__edge-path {
+  animation: wrouter-drift 6s linear infinite;
+  will-change: stroke-dashoffset;
+}
+
+@keyframes wrouter-drift {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    /* One full cycle for "10 8" pattern: 10 + 8 = 18 */
+    stroke-dashoffset: -18;
+  }
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requestLogs } from "@/lib/db/schema";
-import { desc, sql } from "drizzle-orm";
+import { requestLogs, apiKeys, providers } from "@/lib/db/schema";
+import { desc, sql, eq } from "drizzle-orm";
 import { verifySession } from "@/lib/auth/session";
 
 function checkAuth(req: NextRequest): boolean {
@@ -18,9 +18,28 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(url.searchParams.get("limit") || "50");
   const offset = parseInt(url.searchParams.get("offset") || "0");
 
-  const logs = db
-    .select()
+  // LEFT JOIN with api_keys + providers so we get readable names
+  // (api keys can be deleted; LEFT JOIN keeps the log row in that case).
+  const rows = db
+    .select({
+      id: requestLogs.id,
+      timestamp: requestLogs.timestamp,
+      model: requestLogs.model,
+      providerId: requestLogs.providerId,
+      providerName: providers.name,
+      providerPrefix: providers.prefix,
+      comboId: requestLogs.comboId,
+      apiKeyId: requestLogs.apiKeyId,
+      apiKeyName: apiKeys.name,
+      tokensIn: requestLogs.tokensIn,
+      tokensOut: requestLogs.tokensOut,
+      latencyMs: requestLogs.latencyMs,
+      status: requestLogs.status,
+      error: requestLogs.error,
+    })
     .from(requestLogs)
+    .leftJoin(apiKeys, eq(requestLogs.apiKeyId, apiKeys.id))
+    .leftJoin(providers, eq(requestLogs.providerId, providers.id))
     .orderBy(desc(requestLogs.timestamp))
     .limit(limit)
     .offset(offset)
@@ -32,5 +51,5 @@ export async function GET(req: NextRequest) {
     .from(requestLogs)
     .all();
 
-  return NextResponse.json({ logs, total: count, limit, offset });
+  return NextResponse.json({ logs: rows, total: count, limit, offset });
 }

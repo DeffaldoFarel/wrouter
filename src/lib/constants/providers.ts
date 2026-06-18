@@ -8,6 +8,10 @@ export interface KnownApiKeyProvider {
   docsUrl?: string;
   keyPlaceholder: string;
   keyHint?: string;
+  // Brand color (CSS color or hex) for icon background
+  brandColor?: string;
+  // Short label used inside the icon (e.g., "OR" for OpenRouter)
+  iconLabel?: string;
 }
 
 export const KNOWN_API_KEY_PROVIDERS: KnownApiKeyProvider[] = [
@@ -19,6 +23,8 @@ export const KNOWN_API_KEY_PROVIDERS: KnownApiKeyProvider[] = [
     docsUrl: "https://openrouter.ai/keys",
     keyPlaceholder: "sk-or-...",
     keyHint: "openrouter.ai/keys",
+    brandColor: "#000000",
+    iconLabel: "OR",
   },
   {
     name: "DeepSeek",
@@ -28,15 +34,19 @@ export const KNOWN_API_KEY_PROVIDERS: KnownApiKeyProvider[] = [
     docsUrl: "https://platform.deepseek.com/api_keys",
     keyPlaceholder: "sk-...",
     keyHint: "platform.deepseek.com",
+    brandColor: "#4d6bfe",
+    iconLabel: "DS",
   },
   {
-    name: "Google Gemini",
+    name: "Google AI Studio",
     prefix: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/",
     description: "Frontier models (Gemini 3.5 Flash, 3.1 Pro, 2.5 Pro) with OpenAI-compatible endpoint, up to 2M context",
     docsUrl: "https://aistudio.google.com/apikey",
     keyPlaceholder: "AIza...",
     keyHint: "aistudio.google.com/apikey",
+    brandColor: "#4285f4",
+    iconLabel: "AI",
   },
   // Add more API Key Providers here as needed
 ];
