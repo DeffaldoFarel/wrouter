@@ -36,7 +36,6 @@ import {
   Sun,
   Moon,
   HeartPulse,
-  History,
   Zap,
   ChevronLeft,
   ChevronRight,
@@ -112,12 +111,6 @@ const NAV_SECTIONS: NavSection[] = [
         href: "/dashboard/settings",
         icon: Settings,
         description: "Configuration",
-      },
-      {
-        label: "Changelog",
-        href: "/dashboard/changelog",
-        icon: History,
-        description: "Version history",
       },
     ],
   },
@@ -284,11 +277,13 @@ function SidebarBody({
               GitHub
             </a>
             <a
-              href="#"
+              href="https://github.com/DeffaldoFarel/wrouter/blob/main/CHANGELOG.md"
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
             >
               <BookOpen className="h-3 w-3" />
-              Docs
+              Changelogs
             </a>
             <span className="ml-auto text-muted-foreground/50">
               <ExternalLink className="h-3 w-3" />

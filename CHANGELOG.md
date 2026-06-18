@@ -5,6 +5,18 @@ All notable changes to WRouter will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-19
+
+### ✨ Added
+- **Response Details Logging** — Full response JSON dari provider tersimpan di request logs (non-streaming: full body, streaming: summary usage + metadata)
+- **Response Detail Display** — Section "Response Details" di Usage page sheet dengan format pretty-print JSON + tombol Copy
+- **Request Details Full JSON** — Tombol "Copy full JSON" di Usage page sheet (selain "Copy body only")
+
+### 🔧 Changed
+- **Provider Detail Layout** — Search di kiri, Add model + button nempel kanan (`ml-auto`)
+- **Add Model Field** — Lebar diperbesar ke `w-80` (320px) untuk input model name yang lebih panjang
+- **Usage Detail Sheet** — Lebar diperbesar ke `max-w-3xl` (~768px) untuk tampilan JSON yang lebih nyaman dibaca
+
 ## [1.3.0] - 2026-06-18
 
 ### ✨ Added

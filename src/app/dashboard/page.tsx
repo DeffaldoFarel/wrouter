@@ -621,9 +621,6 @@ export default function DashboardPage() {
                   Add Provider
                 </Button>
               </Link>
-              <Link href="/dashboard/changelog">
-                <Button variant="outline">What&apos;s new?</Button>
-              </Link>
             </div>
           </CardContent>
         </Card>

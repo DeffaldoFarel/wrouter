@@ -75,7 +75,8 @@ interface ProxyResult {
 export async function proxyWithFallback(
   requestBody: ChatCompletionRequest,
   fallbackChain: RoutingResult[],
-  apiKeyId?: string
+  apiKeyId?: string,
+  requestDetail?: string
 ): Promise<ProxyResult> {
   let lastError: Error | null = null;
   incrementActiveJobs();
@@ -97,8 +98,10 @@ export async function proxyWithFallback(
         // Parse original response to extract token usage
         let tokensIn: number | undefined = undefined;
         let tokensOut: number | undefined = undefined;
+        let responseJson: string | null = null;
         try {
           const json = await response.json();
+          responseJson = JSON.stringify(json);
           tokensIn  = json.usage?.prompt_tokens     ?? undefined;
           tokensOut = json.usage?.completion_tokens ?? undefined;
         } catch { /* ignore parse errors */ }
@@ -111,6 +114,8 @@ export async function proxyWithFallback(
           status: "success",
           tokensIn,
           tokensOut,
+          requestDetail,
+          responseDetail: responseJson,
         });
 
         logger.info({
@@ -138,6 +143,8 @@ export async function proxyWithFallback(
         latencyMs,
         status: "fallback",
         error: lastError.message,
+        requestDetail,
+        responseDetail: JSON.stringify({ status: response.status, error: errorText.slice(0, 2000) }),
       });
 
       logger.warn({
@@ -159,6 +166,8 @@ export async function proxyWithFallback(
         latencyMs,
         status: "error",
         error: lastError.message,
+        requestDetail,
+        responseDetail: JSON.stringify({ error: lastError.message }),
       });
 
       logger.error({
@@ -220,7 +229,8 @@ async function forwardRequest(
 export async function proxyStreamWithFallback(
   requestBody: ChatCompletionRequest,
   fallbackChain: RoutingResult[],
-  apiKeyId?: string
+  apiKeyId?: string,
+  requestDetail?: string
 ): Promise<{ stream: ReadableStream; providerId: string }> {
   let lastError: Error | null = null;
   incrementActiveJobs();
@@ -275,6 +285,8 @@ export async function proxyStreamWithFallback(
           latencyMs,
           status: "fallback",
           error: lastError.message,
+          requestDetail,
+          responseDetail: JSON.stringify({ stream: true, status: response.status, error: errorText.slice(0, 2000) }),
         });
         logger.warn({
           model: target.model,
@@ -294,39 +306,74 @@ export async function proxyStreamWithFallback(
 
       const timeToFirstByte = Date.now() - startTime;
 
-      // Tap the stream to extract token usage from the final SSE chunk
+      // Tap the stream to extract token usage from the final SSE chunk.
+      // Many providers (OpenRouter, DeepSeek, etc.) send usage in the final
+      // SSE chunk — which can be either:
+      //   • data: {"id":"...","usage":{"prompt_tokens":155,"completion_tokens":2611}}
+      //   • data: [DONE] followed by data: {"usage":{...}}
+      // The parser now handles all variants:
+      //   1. Usage embedded in the [DONE] chunk
+      //   2. Usage as a separate chunk after [DONE]
+      //   3. Usage anywhere in the stream
+      // It also accumulates a partial buffer so JSON split across multiple
+      // TCP chunks is reassembled before parsing.
       const originalStream = response.body;
       let tokensIn: number | undefined = undefined;
       let tokensOut: number | undefined = undefined;
+      let sseBuffer = "";
+
+      function extractUsageFromJson(json: unknown) {
+        if (json && typeof json === "object" && "usage" in json) {
+          const u = (json as Record<string, unknown>).usage;
+          if (u && typeof u === "object") {
+            const obj = u as Record<string, unknown>;
+            tokensIn  = (obj.prompt_tokens as number)     ?? tokensIn;
+            tokensOut = (obj.completion_tokens as number) ?? tokensOut;
+          }
+        }
+      }
 
       const tappedStream = new ReadableStream({
         async start(streamController) {
           const reader = originalStream.getReader();
-          const decoder = new TextDecoder();
           try {
             while (true) {
               const { done, value } = await reader.read();
-              if (done) break;
-              // Try to extract usage from SSE chunks
-              const chunk = decoder.decode(value, { stream: true });
-              const lines = chunk.split("\n");
-              for (const line of lines) {
-                if (line.startsWith("data: ") && line !== "data: [DONE]") {
+              if (done) {
+                // Flush any remaining buffer content
+                if (sseBuffer.startsWith("data: ") && sseBuffer.trim() !== "data: [DONE]") {
                   try {
-                    const json = JSON.parse(line.slice(6));
-                    if (json.usage) {
-                      tokensIn  = json.usage.prompt_tokens     ?? tokensIn;
-                      tokensOut = json.usage.completion_tokens ?? tokensOut;
-                    }
+                    extractUsageFromJson(JSON.parse(sseBuffer.slice(6)));
                   } catch { /* ignore */ }
                 }
+                break;
               }
+              const chunk = new TextDecoder().decode(value);
+              sseBuffer += chunk;
+
+              // Split on newline boundaries and process complete lines
+              const parts = sseBuffer.split("\n");
+              // Keep the last (potentially incomplete) part in the buffer
+              sseBuffer = parts.pop() ?? "";
+
+              for (const line of parts) {
+                if (!line.startsWith("data: ")) continue;
+
+                const payload = line.slice(6).trim();
+                if (!payload || payload === "[DONE]") continue;
+
+                try {
+                  const json = JSON.parse(payload);
+                  extractUsageFromJson(json);
+                } catch { /* partial / malformed JSON — ignore */ }
+              }
+
               streamController.enqueue(value);
             }
           } finally {
             reader.releaseLock();
             streamController.close();
-            // Log after stream completes - use total duration, not time-to-first-byte
+            // Log after stream completes — use total duration, not time-to-first-byte
             const totalDuration = Date.now() - startTime;
             logRequest({
               model: target.model,
@@ -336,6 +383,8 @@ export async function proxyStreamWithFallback(
               status: "success",
               tokensIn,
               tokensOut,
+              requestDetail,
+              responseDetail: JSON.stringify({ stream: true, tokensIn, tokensOut, latencyMs: totalDuration }),
             });
             logger.info({
               model: target.model,
@@ -364,6 +413,8 @@ export async function proxyStreamWithFallback(
         latencyMs,
         status: "error",
         error: lastError.message,
+        requestDetail,
+        responseDetail: JSON.stringify({ stream: true, error: lastError.message }),
       });
       logger.error({
         err: lastError,

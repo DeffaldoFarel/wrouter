@@ -365,6 +365,8 @@ export function logRequest(params: {
   latencyMs: number;
   status: "success" | "error" | "fallback";
   error?: string;
+  requestDetail?: string | null;
+  responseDetail?: string | null;
 }) {
   const entry = {
     id: uuidv4(),
@@ -378,6 +380,8 @@ export function logRequest(params: {
     latencyMs: params.latencyMs,
     status: params.status,
     error: params.error || null,
+    requestDetail: params.requestDetail || null,
+    responseDetail: params.responseDetail || null,
   };
 
   db.insert(requestLogs).values(entry).run();

@@ -147,7 +147,7 @@ function ComboCard({
   const sortedModels = [...combo.models].sort((a, b) => a.priority - b.priority);
   const getProvider = (id: string) => providers.find((p) => p.id === id);
 
-  const fullSlug = `${combo.slug}/<model>`;
+  const fullSlug = combo.slug;
 
   return (
     <Card className="group transition-all hover:shadow-md hover:border-primary/40">
@@ -583,7 +583,7 @@ export default function CombosPage() {
               <div className="rounded-md bg-muted/30 border px-3 py-2 text-xs space-y-1">
                 <p className="text-muted-foreground">Use this combo in API requests:</p>
                 <code className="font-mono text-foreground/80">
-                  &quot;model&quot;: &quot;{slugPreview}/&lt;any-model-name&gt;&quot;
+                  &quot;model&quot;: &quot;{slugPreview}&quot;
                 </code>
               </div>
 
@@ -1007,11 +1007,10 @@ export default function CombosPage() {
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <ArrowRight className="h-3 w-3" />
             <span>
-              Use a combo by sending requests with{" "}
+              Use a combo by sending its slug as the model field, e.g.{" "}
               <code className="bg-muted px-1.5 py-0.5 rounded">
-                slug/&lt;model-name&gt;
-              </code>{" "}
-              as the model field
+                my-combo
+              </code>
             </span>
           </div>
         </div>

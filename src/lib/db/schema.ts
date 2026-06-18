@@ -50,6 +50,8 @@ export const requestLogs = sqliteTable("request_logs", {
   latencyMs: integer("latency_ms"),
   status: text("status").notNull(), // success | error | fallback
   error: text("error"),
+  requestDetail: text("request_detail"), // JSON: full request body
+  responseDetail: text("response_detail"), // JSON: full response body from provider
 }, (table) => ({
   // Indexes for common queries
   timestampIdx: index("timestamp_idx").on(table.timestamp),

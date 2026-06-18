@@ -912,9 +912,18 @@ export default function ProviderDetailPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Add model + Search */}
-            <div className="grid gap-2 md:grid-cols-2">
-              <div className="flex gap-2">
+            {/* Search + Add model */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[200px] max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Search models..."
+                  value={modelSearch}
+                  onChange={(e) => setModelSearch(e.target.value)}
+                  className="pl-9 font-mono text-sm"
+                />
+              </div>
+              <div className="flex gap-2 ml-auto">
                 <Input
                   placeholder="Add model (e.g. gpt-4o)"
                   value={newModel}
@@ -925,7 +934,7 @@ export default function ProviderDetailPage() {
                       addModel();
                     }
                   }}
-                  className="font-mono text-sm"
+                  className="font-mono text-sm w-80"
                 />
                 <Button
                   type="button"
@@ -937,17 +946,6 @@ export default function ProviderDetailPage() {
                   Add
                 </Button>
               </div>
-              {modelList.length > 5 && (
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    placeholder="Search models..."
-                    value={modelSearch}
-                    onChange={(e) => setModelSearch(e.target.value)}
-                    className="pl-9 font-mono text-sm"
-                  />
-                </div>
-              )}
             </div>
 
             {/* Model health summary */}

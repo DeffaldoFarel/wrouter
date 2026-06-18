@@ -136,6 +136,33 @@ export async function POST(req: NextRequest) {
       processedBody.messages = injectCavemanPrompt(processedBody.messages);
     }
 
+    // ─── Debug logging ───
+    const systemMsg = processedBody.messages?.find((m: any) => m.role === "system");
+    logger.info({
+      event: "proxy_debug",
+      model_requested: model,
+      message_count: processedBody.messages?.length ?? 0,
+      has_system: !!systemMsg,
+      system_preview: systemMsg
+        ? typeof systemMsg.content === "string"
+          ? systemMsg.content.slice(0, 300)
+          : "[non-string content]"
+        : null,
+      rtk_applied: rtkEnabled?.value === "true",
+      caveman_applied: cavemanEnabled?.value === "true",
+      stream: !!stream,
+      body_keys: Object.keys(processedBody),
+    }, "[DEBUG] Chat completion request — check if system prompt is present");
+
+    // ─── Build request detail for DB storage ───
+    const requestDetail = JSON.stringify({
+      model_requested: model,
+      rtk_applied: rtkEnabled?.value === "true",
+      caveman_applied: cavemanEnabled?.value === "true",
+      stream: !!stream,
+      body: processedBody,
+    });
+
     // Get fallback chain for the requested model
     const fallbackChain = getFallbackChain(model!);
 
@@ -164,7 +191,8 @@ export async function POST(req: NextRequest) {
       const { stream: responseStream } = await proxyStreamWithFallback(
         processedBody,
         fallbackChain,
-        apiKeyId
+        apiKeyId,
+        requestDetail
       );
 
       return new Response(responseStream, {
@@ -178,7 +206,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Non-streaming response
-    const { response } = await proxyWithFallback(processedBody, fallbackChain, apiKeyId);
+    const { response } = await proxyWithFallback(processedBody, fallbackChain, apiKeyId, requestDetail);
     const data = await response.json();
 
     // Fire-and-forget log retention cleanup

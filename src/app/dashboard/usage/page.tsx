@@ -70,6 +70,8 @@ interface LogEntry {
   latencyMs: number | null;
   status: string;
   error: string | null;
+  requestDetail?: string | null;
+  responseDetail?: string | null;
 }
 
 interface DayRequests { date: string; requests: number; errors: number; }
@@ -606,7 +608,7 @@ function LogDetailSheet({
     <Sheet open={!!log} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-xl overflow-y-auto"
+        className="w-full sm:!max-w-3xl overflow-y-auto"
       >
         <SheetHeader className="border-b">
           <SheetTitle className="flex items-center gap-2">
@@ -776,6 +778,96 @@ function LogDetailSheet({
               >
                 <Copy className="h-3 w-3" />
                 Copy error
+              </button>
+            </div>
+          )}
+
+          {/* Request Details JSON */}
+          {log.requestDetail && (
+            <div className="space-y-2 pt-3 border-t">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                Request Details
+              </p>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <pre className="text-xs font-mono whitespace-pre-wrap break-all text-muted-foreground max-h-[600px] overflow-y-auto leading-relaxed">
+                  {(() => {
+                    try {
+                      return JSON.stringify(JSON.parse(log.requestDetail!), null, 2);
+                    } catch {
+                      return log.requestDetail!;
+                    }
+                  })()}
+                </pre>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      const parsed = JSON.parse(log.requestDetail!);
+                      navigator.clipboard.writeText(JSON.stringify(parsed, null, 2));
+                    } catch {
+                      navigator.clipboard.writeText(log.requestDetail!);
+                    }
+                    toast.success("Full JSON copied");
+                  }}
+                  className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                >
+                  <Copy className="h-3 w-3" />
+                  Copy full JSON
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      const parsed = JSON.parse(log.requestDetail!);
+                      navigator.clipboard.writeText(JSON.stringify(parsed.body ?? parsed, null, 2));
+                      toast.success("Request body copied");
+                    } catch {
+                      toast.error("Failed to parse JSON");
+                    }
+                  }}
+                  className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                >
+                  <Copy className="h-3 w-3" />
+                  Copy body only
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Response Details JSON */}
+          {log.responseDetail && (
+            <div className="space-y-2 pt-3 border-t">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
+                Response Details
+              </p>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <pre className="text-xs font-mono whitespace-pre-wrap break-all text-muted-foreground max-h-[600px] overflow-y-auto leading-relaxed">
+                  {(() => {
+                    try {
+                      return JSON.stringify(JSON.parse(log.responseDetail!), null, 2);
+                    } catch {
+                      return log.responseDetail!;
+                    }
+                  })()}
+                </pre>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    const parsed = JSON.parse(log.responseDetail!);
+                    navigator.clipboard.writeText(JSON.stringify(parsed, null, 2));
+                  } catch {
+                    navigator.clipboard.writeText(log.responseDetail!);
+                  }
+                  toast.success("Response JSON copied");
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+              >
+                <Copy className="h-3 w-3" />
+                Copy response JSON
               </button>
             </div>
           )}

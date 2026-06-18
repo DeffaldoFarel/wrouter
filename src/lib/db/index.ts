@@ -62,11 +62,14 @@ export function initializeDatabase() {
       model TEXT,
       provider_id TEXT,
       combo_id TEXT,
+      api_key_id TEXT,
       tokens_in INTEGER,
       tokens_out INTEGER,
       latency_ms INTEGER,
       status TEXT NOT NULL,
-      error TEXT
+      error TEXT,
+      request_detail TEXT,
+      response_detail TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
@@ -118,6 +121,20 @@ export function initializeDatabase() {
   // Migration: add allowed_models column to api_keys if not exists
   try {
     sqlite.exec(`ALTER TABLE api_keys ADD COLUMN allowed_models TEXT NOT NULL DEFAULT '[]'`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Migration: add request_detail column to request_logs if not exists
+  try {
+    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN request_detail TEXT`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Migration: add response_detail column to request_logs if not exists
+  try {
+    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN response_detail TEXT`);
   } catch {
     // Column already exists, ignore
   }

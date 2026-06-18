@@ -36,6 +36,8 @@ export async function GET(req: NextRequest) {
       latencyMs: requestLogs.latencyMs,
       status: requestLogs.status,
       error: requestLogs.error,
+      requestDetail: requestLogs.requestDetail,
+      responseDetail: requestLogs.responseDetail,
     })
     .from(requestLogs)
     .leftJoin(apiKeys, eq(requestLogs.apiKeyId, apiKeys.id))
