@@ -47,6 +47,20 @@ export async function POST(req: NextRequest) {
     }
 
     const { name, prefix, baseUrl, apiKey, type = "custom" } = body;
+    // Format determines upstream API dialect: "openai" (default) | "anthropic" | "gemini"
+    // Auto-detect from baseUrl if caller didn't specify (e.g. anthropic.com → anthropic).
+    let { format } = body as { format?: string };
+    if (!format) {
+      if (baseUrl.includes("anthropic.com")) format = "anthropic";
+      else if (baseUrl.includes("generativelanguage.googleapis.com")) format = "gemini";
+      else format = "openai";
+    }
+    if (!["openai", "anthropic", "gemini"].includes(format)) {
+      return NextResponse.json(
+        { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', or 'gemini'.` },
+        { status: 400 }
+      );
+    }
 
     // SSRF guard: validate baseUrl before storing
     const ssrfCheck = await validateUrl(baseUrl);
@@ -76,6 +90,7 @@ export async function POST(req: NextRequest) {
       models: JSON.stringify([]),
       enabled: true,
       type,
+      format,
       createdAt: now,
       updatedAt: now,
     };

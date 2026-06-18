@@ -434,6 +434,7 @@ export default function ProvidersPage() {
   // Form state
   const [name, setName] = useState("");
   const [prefix, setPrefix] = useState("");
+  const [format, setFormat] = useState<"openai" | "anthropic">("openai");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
 
@@ -528,6 +529,7 @@ export default function ProvidersPage() {
   function resetForm() {
     setName("");
     setPrefix("");
+    setFormat("openai");
     setBaseUrl("");
     setApiKey("");
   }
@@ -539,7 +541,7 @@ export default function ProvidersPage() {
       const res = await fetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, prefix, baseUrl, apiKey, type: "custom" }),
+        body: JSON.stringify({ name, prefix, baseUrl, apiKey, type: "custom", format }),
       });
 
       if (res.ok) {
@@ -702,9 +704,34 @@ export default function ProvidersPage() {
                     id="baseUrl"
                     placeholder="https://api.example.com/v1"
                     value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setBaseUrl(v);
+                      // Auto-detect format from URL
+                      if (v.includes("anthropic.com")) setFormat("anthropic");
+                      else if (v.length > 0 && format === "anthropic" && !v.includes("anthropic.com")) {
+                        setFormat("openai");
+                      }
+                    }}
                     required
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="format">API Format</Label>
+                  <select
+                    id="format"
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+                    value={format}
+                    onChange={(e) => setFormat(e.target.value as "openai" | "anthropic")}
+                  >
+                    <option value="openai">OpenAI-compatible (default)</option>
+                    <option value="anthropic">Anthropic native (/v1/messages)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    {format === "anthropic"
+                      ? "Provider speaks Anthropic /v1/messages with x-api-key header. WRouter translates OpenAI ⇄ Anthropic transparently."
+                      : "Standard /v1/chat/completions with Bearer auth (OpenAI, DeepSeek, Genflow, OpenRouter, etc.)"}
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="apiKey">API Key</Label>

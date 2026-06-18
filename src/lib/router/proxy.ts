@@ -1,22 +1,15 @@
 import { RoutingResult, getFallbackChain, logRequest, incrementActiveJobs, decrementActiveJobs, notifyRequestStart } from "./engine";
+import { estimateInputTokens, estimateOutputTokens, MessageLike } from "./token-estimator";
+import { extractUsage, hasMeaningfulUsage, NormalizedUsage } from "./usage-extractor";
+import { openaiToAnthropicRequest, anthropicToOpenaiResponse, translateAnthropicStream } from "./translator/anthropic";
+import type { ChatCompletionRequest } from "./proxy-types";
 import logger from "@/lib/logger";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
-interface ChatCompletionRequest {
-  model: string;
-  messages: Array<{ role: string; content: string | unknown }>;
-  temperature?: number;
-  max_tokens?: number;
-  stream?: boolean;
-  top_p?: number;
-  frequency_penalty?: number;
-  presence_penalty?: number;
-  stop?: string | string[];
-  provider?: Record<string, unknown>;
-  [key: string]: unknown;
-}
+// Re-export so existing call sites in route.ts keep working
+export type { ChatCompletionRequest };
 
 /**
  * Check if a URL is an OpenRouter endpoint.
@@ -94,17 +87,97 @@ export async function proxyWithFallback(
       if (response.ok) {
         // Clone response before consuming to avoid double memory allocation
         const responseForClient = response.clone();
-        
-        // Parse original response to extract token usage
+
+        // Parse upstream JSON to extract token usage (multi-format aware).
+        // If the upstream did not give us usage, fall back to gpt-tokenizer estimation.
         let tokensIn: number | undefined = undefined;
         let tokensOut: number | undefined = undefined;
         let responseJson: string | null = null;
+        let upstreamUsage: NormalizedUsage | null = null;
+        let estimated = false;
+        let parsedJson: Record<string, unknown> | null = null;
+
         try {
           const json = await response.json();
+          parsedJson = json as Record<string, unknown>;
           responseJson = JSON.stringify(json);
-          tokensIn  = json.usage?.prompt_tokens     ?? undefined;
-          tokensOut = json.usage?.completion_tokens ?? undefined;
-        } catch { /* ignore parse errors */ }
+          upstreamUsage = extractUsage(json);
+        } catch { /* ignore parse errors — fall through to estimation */ }
+
+        if (hasMeaningfulUsage(upstreamUsage)) {
+          tokensIn = upstreamUsage!.prompt_tokens;
+          tokensOut = upstreamUsage!.completion_tokens;
+        } else {
+          // Upstream didn't return usage (or returned all-zeros) → estimate locally
+          try {
+            const msgs = (requestBody.messages as MessageLike[]) ?? [];
+            tokensIn = estimateInputTokens(msgs);
+
+            // Try to read response text from common shapes
+            let outText = "";
+            if (parsedJson) {
+              const choices = parsedJson.choices as Array<Record<string, unknown>> | undefined;
+              if (Array.isArray(choices) && choices.length > 0) {
+                const msg = choices[0]?.message as Record<string, unknown> | undefined;
+                const content = msg?.content;
+                if (typeof content === "string") outText = content;
+              }
+              // Anthropic shape: content: [{ type: "text", text: "..." }]
+              if (!outText && Array.isArray(parsedJson.content)) {
+                outText = (parsedJson.content as Array<Record<string, unknown>>)
+                  .map((c) => (typeof c.text === "string" ? c.text : ""))
+                  .join("");
+              }
+            }
+            tokensOut = estimateOutputTokens(outText);
+            estimated = true;
+          } catch (err) {
+            logger.warn({ err }, "Token estimation fallback failed (non-stream)");
+          }
+        }
+
+        // For Anthropic-format providers, translate response → OpenAI shape so the
+        // client (which called WRouter at /chat/completions) sees a familiar payload.
+        // We re-extract usage from the translated body so estimated/cache fields stay aligned.
+        if (target.format === "anthropic" && parsedJson) {
+          const translated = anthropicToOpenaiResponse(parsedJson);
+          parsedJson = translated as Record<string, unknown>;
+          responseJson = JSON.stringify(parsedJson);
+          // Re-pull usage from translated body (it now lives at .usage.prompt_tokens/completion_tokens)
+          const reExtracted = extractUsage(parsedJson);
+          if (hasMeaningfulUsage(reExtracted)) {
+            tokensIn = reExtracted!.prompt_tokens;
+            tokensOut = reExtracted!.completion_tokens;
+            estimated = false;
+          }
+        }
+
+        // If we estimated OR translated (Anthropic), build a fresh Response with the
+        // augmented body. Otherwise keep the original cloned response.
+        let finalResponseForClient: Response = responseForClient;
+        const needRebuild = (estimated && parsedJson) || (target.format === "anthropic" && parsedJson);
+        if (needRebuild && parsedJson) {
+          const baseUsage = (parsedJson.usage as Record<string, unknown>) ?? {};
+          const augmented: Record<string, unknown> = {
+            ...parsedJson,
+            usage: {
+              ...baseUsage,
+              prompt_tokens: tokensIn ?? Number(baseUsage.prompt_tokens) ?? 0,
+              completion_tokens: tokensOut ?? Number(baseUsage.completion_tokens) ?? 0,
+              total_tokens: (tokensIn ?? 0) + (tokensOut ?? 0),
+              ...(estimated ? { estimated: true } : {}),
+            },
+          };
+          // Strip content-length and content-encoding — body changed
+          const cleanHeaders = new Headers(response.headers);
+          cleanHeaders.delete("content-length");
+          cleanHeaders.delete("content-encoding");
+          cleanHeaders.set("content-type", "application/json");
+          finalResponseForClient = new Response(JSON.stringify(augmented), {
+            status: response.status,
+            headers: cleanHeaders,
+          });
+        }
 
         logRequest({
           model: target.model,
@@ -126,10 +199,10 @@ export async function proxyWithFallback(
           tokensIn,
           tokensOut,
           stream: false,
+          usageSource: estimated ? "estimated" : "upstream",
         }, "Proxy request succeeded");
 
-        // Return cloned response (body not consumed)
-        return { response: responseForClient, providerId: target.providerId, latencyMs };
+        return { response: finalResponseForClient, providerId: target.providerId, latencyMs };
       }
 
       // Provider returned an error, try next in chain
@@ -188,19 +261,50 @@ export async function proxyWithFallback(
 
 /**
  * Forward request to a single provider.
+ *
+ * For OpenAI-format providers (default): POST {baseUrl}/chat/completions with the
+ * caller's body (after model resolution + OpenRouter prefs injection).
+ *
+ * For Anthropic-format providers (target.format === "anthropic"): translate the
+ * OpenAI-shaped request to /v1/messages, swap headers (x-api-key + anthropic-version),
+ * and let the response come back in Anthropic shape — proxyWithFallback will
+ * detect that and call anthropicToOpenaiResponse before returning to the client.
  */
 async function forwardRequest(
   requestBody: ChatCompletionRequest,
   target: RoutingResult
 ): Promise<Response> {
-  const url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const isAnthropic = target.format === "anthropic";
+  const url = isAnthropic
+    ? `${target.baseUrl.replace(/\/$/, "")}/messages`
+    : `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-  // Build the forwarded body with the resolved model + OpenRouter provider injection
-  const injected = injectOpenRouterProvider(requestBody, target);
-  const forwardBody = {
-    ...injected,
-    model: target.model,
-  };
+  let forwardBody: unknown;
+  let headers: Record<string, string>;
+
+  if (isAnthropic) {
+    const anthropicReq = openaiToAnthropicRequest({
+      ...requestBody,
+      model: target.model,
+    });
+    forwardBody = anthropicReq;
+    headers = {
+      "Content-Type": "application/json",
+      "x-api-key": target.apiKey,
+      "anthropic-version": "2023-06-01",
+    };
+  } else {
+    // Build the forwarded body with the resolved model + OpenRouter provider injection
+    const injected = injectOpenRouterProvider(requestBody, target);
+    forwardBody = {
+      ...injected,
+      model: target.model,
+    };
+    headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${target.apiKey}`,
+    };
+  }
 
   // Add timeout to prevent hanging requests
   const controller = new AbortController();
@@ -209,10 +313,7 @@ async function forwardRequest(
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${target.apiKey}`,
-      },
+      headers,
       body: JSON.stringify(forwardBody),
       signal: controller.signal,
     });
@@ -243,17 +344,40 @@ export async function proxyStreamWithFallback(
       // Notify UI that a request is starting on this provider
       notifyRequestStart(target.providerId, target.providerName, target.model);
 
-      const url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
+      const isAnthropic = target.format === "anthropic";
+      const url = isAnthropic
+        ? `${target.baseUrl.replace(/\/$/, "")}/messages`
+        : `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
 
-      // Inject OpenRouter provider preferences + resolved model
-      const injected = injectOpenRouterProvider(requestBody, target);
-      const forwardBody = {
-        ...injected,
-        model: target.model,
-        stream: true,
-        // Request usage stats in the final SSE chunk (OpenAI-compatible providers)
-        stream_options: { include_usage: true },
-      };
+      let forwardBody: unknown;
+      let headers: Record<string, string>;
+
+      if (isAnthropic) {
+        const anthropicReq = openaiToAnthropicRequest({
+          ...requestBody,
+          model: target.model,
+        });
+        forwardBody = { ...anthropicReq, stream: true };
+        headers = {
+          "Content-Type": "application/json",
+          "x-api-key": target.apiKey,
+          "anthropic-version": "2023-06-01",
+        };
+      } else {
+        // Inject OpenRouter provider preferences + resolved model
+        const injected = injectOpenRouterProvider(requestBody, target);
+        forwardBody = {
+          ...injected,
+          model: target.model,
+          stream: true,
+          // Request usage stats in the final SSE chunk (OpenAI-compatible providers)
+          stream_options: { include_usage: true },
+        };
+        headers = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${target.apiKey}`,
+        };
+      }
 
       // Add timeout for initial connection (5 minutes for streaming)
       const controller = new AbortController();
@@ -263,10 +387,7 @@ export async function proxyStreamWithFallback(
       try {
         response = await fetch(url, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${target.apiKey}`,
-          },
+          headers,
           body: JSON.stringify(forwardBody),
           signal: controller.signal,
         });
@@ -317,18 +438,64 @@ export async function proxyStreamWithFallback(
       //   3. Usage anywhere in the stream
       // It also accumulates a partial buffer so JSON split across multiple
       // TCP chunks is reassembled before parsing.
-      const originalStream = response.body;
+      //
+      // FALLBACK: Some providers (e.g., Genflow) ignore stream_options.include_usage
+      // and never send a usage chunk. We accumulate delta.content from every chunk
+      // and tokenize it ourselves with gpt-tokenizer when usage is missing.
+      // For Anthropic providers: translate the upstream Anthropic-SSE stream into
+      // OpenAI-SSE chunks first, then run all the same usage-extraction logic on
+      // the OpenAI shape. The translator already emits a usage chunk at the end
+      // (mirroring `stream_options.include_usage`), so downstream code can stay format-agnostic.
+      const originalStream = isAnthropic
+        ? translateAnthropicStream(response.body)
+        : response.body;
       let tokensIn: number | undefined = undefined;
       let tokensOut: number | undefined = undefined;
+      let usageFromUpstream = false;
+      let accumulatedContent = "";
       let sseBuffer = "";
 
-      function extractUsageFromJson(json: unknown) {
-        if (json && typeof json === "object" && "usage" in json) {
-          const u = (json as Record<string, unknown>).usage;
-          if (u && typeof u === "object") {
-            const obj = u as Record<string, unknown>;
-            tokensIn  = (obj.prompt_tokens as number)     ?? tokensIn;
-            tokensOut = (obj.completion_tokens as number) ?? tokensOut;
+      function tryExtractUsage(json: unknown) {
+        const u = extractUsage(json);
+        if (hasMeaningfulUsage(u)) {
+          tokensIn = u!.prompt_tokens;
+          tokensOut = u!.completion_tokens;
+          usageFromUpstream = true;
+        }
+      }
+
+      function accumulateDeltaContent(json: unknown) {
+        if (!json || typeof json !== "object") return;
+        const obj = json as Record<string, unknown>;
+
+        // OpenAI / DeepSeek / Genflow streaming: choices[0].delta.content
+        const choices = obj.choices as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(choices) && choices.length > 0) {
+          const delta = choices[0]?.delta as Record<string, unknown> | undefined;
+          if (delta && typeof delta.content === "string") {
+            accumulatedContent += delta.content;
+            return;
+          }
+        }
+
+        // Anthropic content_block_delta: { type, delta: { type: "text_delta", text } }
+        if (obj.type === "content_block_delta") {
+          const delta = obj.delta as Record<string, unknown> | undefined;
+          if (delta && typeof delta.text === "string") {
+            accumulatedContent += delta.text;
+          }
+          return;
+        }
+
+        // Gemini-shaped streaming: candidates[0].content.parts[].text
+        const candidates = obj.candidates as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(candidates) && candidates.length > 0) {
+          const content = candidates[0]?.content as Record<string, unknown> | undefined;
+          const parts = content?.parts as Array<Record<string, unknown>> | undefined;
+          if (Array.isArray(parts)) {
+            for (const part of parts) {
+              if (typeof part.text === "string") accumulatedContent += part.text;
+            }
           }
         }
       }
@@ -343,7 +510,9 @@ export async function proxyStreamWithFallback(
                 // Flush any remaining buffer content
                 if (sseBuffer.startsWith("data: ") && sseBuffer.trim() !== "data: [DONE]") {
                   try {
-                    extractUsageFromJson(JSON.parse(sseBuffer.slice(6)));
+                    const json = JSON.parse(sseBuffer.slice(6));
+                    tryExtractUsage(json);
+                    accumulateDeltaContent(json);
                   } catch { /* ignore */ }
                 }
                 break;
@@ -364,7 +533,8 @@ export async function proxyStreamWithFallback(
 
                 try {
                   const json = JSON.parse(payload);
-                  extractUsageFromJson(json);
+                  tryExtractUsage(json);
+                  accumulateDeltaContent(json);
                 } catch { /* partial / malformed JSON — ignore */ }
               }
 
@@ -372,7 +542,46 @@ export async function proxyStreamWithFallback(
             }
           } finally {
             reader.releaseLock();
+
+            // FALLBACK: If upstream did not return usage, estimate it locally
+            // using gpt-tokenizer on the request messages and accumulated content.
+            let usageSource: "upstream" | "estimated" = "upstream";
+            if (!usageFromUpstream) {
+              try {
+                const msgs = (requestBody.messages as MessageLike[]) ?? [];
+                tokensIn = estimateInputTokens(msgs);
+                tokensOut = estimateOutputTokens(accumulatedContent);
+                usageSource = "estimated";
+
+                // Inject a synthetic SSE chunk with estimated usage so the client
+                // can read it from the stream (mirrors upstream `include_usage`).
+                // Sent as a final OpenAI-format chunk: empty choices + usage block.
+                const syntheticChunk =
+                  "data: " +
+                  JSON.stringify({
+                    id: `wrouter-estimated-${Date.now()}`,
+                    object: "chat.completion.chunk",
+                    created: Math.floor(Date.now() / 1000),
+                    model: target.model,
+                    choices: [],
+                    usage: {
+                      prompt_tokens: tokensIn ?? 0,
+                      completion_tokens: tokensOut ?? 0,
+                      total_tokens: (tokensIn ?? 0) + (tokensOut ?? 0),
+                      estimated: true,
+                    },
+                  }) +
+                  "\n\n";
+                try {
+                  streamController.enqueue(new TextEncoder().encode(syntheticChunk));
+                } catch { /* stream may already be closed */ }
+              } catch (err) {
+                logger.warn({ err }, "Token estimation fallback failed");
+              }
+            }
+
             streamController.close();
+
             // Log after stream completes — use total duration, not time-to-first-byte
             const totalDuration = Date.now() - startTime;
             logRequest({
@@ -384,7 +593,7 @@ export async function proxyStreamWithFallback(
               tokensIn,
               tokensOut,
               requestDetail,
-              responseDetail: JSON.stringify({ stream: true, tokensIn, tokensOut, latencyMs: totalDuration }),
+              responseDetail: JSON.stringify({ stream: true, tokensIn, tokensOut, latencyMs: totalDuration, usageSource }),
             });
             logger.info({
               model: target.model,
@@ -394,6 +603,7 @@ export async function proxyStreamWithFallback(
               tokensIn,
               tokensOut,
               stream: true,
+              usageSource,
             }, "Stream request completed");
             // Decrement active jobs only after the stream is fully consumed
             decrementActiveJobs();

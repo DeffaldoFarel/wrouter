@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { APP_VERSION } from "@/lib/version";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -134,15 +132,7 @@ function Logo({ collapsed }: { collapsed: boolean }) {
       </div>
       {!collapsed && (
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <h1 className="text-base font-bold leading-tight">WRouter</h1>
-            <Badge
-              variant="secondary"
-              className="text-[9px] px-1 py-0 h-4 font-mono"
-            >
-              v{APP_VERSION}
-            </Badge>
-          </div>
+          <h1 className="text-base font-bold leading-tight">WRouter</h1>
           <p className="text-[10px] text-muted-foreground truncate">
             AI API Router
           </p>

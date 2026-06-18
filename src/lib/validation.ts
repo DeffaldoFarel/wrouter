@@ -24,8 +24,8 @@ export function validateChatRequest(body: any): ValidationResult {
     if (body.messages.length < 1) {
       errors.push("messages must have at least 1 item");
     }
-    if (body.messages.length > 200) {
-      errors.push("messages must have max 200 items");
+    if (body.messages.length > 1000) {
+      errors.push("messages must have max 1000 items");
     }
 
     const validRoles = ["system", "user", "assistant", "tool"];

@@ -88,6 +88,9 @@ export interface RoutingResult {
   baseUrl: string;
   apiKey: string;
   model: string;
+  // Upstream API dialect: "openai" (default) | "anthropic" | "gemini"
+  // Determines how proxy.ts translates the request/response.
+  format: string;
 }
 
 /**
@@ -125,6 +128,7 @@ export function resolveModel(requestedModel: string): RoutingResult | null {
         providerName: providerByPrefix.name,
         baseUrl: providerByPrefix.baseUrl,
         apiKey: safeDecryptApiKey(providerByPrefix.apiKey),
+        format: (providerByPrefix as { format?: string }).format ?? "openai",
         model: modelName,
       };
     }
@@ -182,6 +186,7 @@ function resolveComboModel(slug: string, modelName: string): RoutingResult | nul
         providerName: provider.name,
         baseUrl: provider.baseUrl,
         apiKey: safeDecryptApiKey(provider.apiKey),
+        format: (provider as { format?: string }).format ?? "openai",
         model: entry.model,
       };
     }
@@ -215,6 +220,7 @@ function resolveComboFirstModel(combo: typeof combos.$inferSelect): RoutingResul
         providerName: provider.name,
         baseUrl: provider.baseUrl,
         apiKey: safeDecryptApiKey(provider.apiKey),
+        format: (provider as { format?: string }).format ?? "openai",
         model: entry.model,
       };
     }
@@ -239,6 +245,7 @@ function resolveDirectModel(modelName: string): RoutingResult | null {
         providerName: provider.name,
         baseUrl: provider.baseUrl,
         apiKey: safeDecryptApiKey(provider.apiKey),
+        format: (provider as { format?: string }).format ?? "openai",
         model: modelName,
       };
     }
@@ -273,6 +280,7 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
           providerName: providerByPrefix.name,
           baseUrl: providerByPrefix.baseUrl,
           apiKey: safeDecryptApiKey(providerByPrefix.apiKey),
+          format: (providerByPrefix as { format?: string }).format ?? "openai",
           model: modelName,
         });
       }
@@ -307,6 +315,7 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
           providerName: provider.name,
           baseUrl: provider.baseUrl,
           apiKey: safeDecryptApiKey(provider.apiKey),
+          format: (provider as { format?: string }).format ?? "openai",
           model: entry.model,
         });
       }
@@ -338,6 +347,7 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
             providerName: provider.name,
             baseUrl: provider.baseUrl,
             apiKey: safeDecryptApiKey(provider.apiKey),
+            format: (provider as { format?: string }).format ?? "openai",
             model: entry.model,
           });
         }

@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { APP_VERSION } from "@/lib/version";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,7 +43,6 @@ export default function LoginPage() {
         <CardHeader className="text-center">
           <CardTitle className="text-2xl font-bold">WRouter</CardTitle>
           <CardDescription>AI API Unified Router</CardDescription>
-          <Badge variant="secondary" className="text-[10px] mt-1">v{APP_VERSION}</Badge>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">

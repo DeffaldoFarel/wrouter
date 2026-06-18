@@ -12,6 +12,11 @@ export const providers = sqliteTable("providers", {
   // "custom" = direct OpenAI-compatible provider (manual model list)
   // "apikey" = aggregator with its own model catalog API (e.g. OpenRouter)
   type: text("type").notNull().default("custom"),
+  // Upstream API format/dialect this provider speaks.
+  //   "openai"    → standard OpenAI-compatible (POST /v1/chat/completions)  ← default
+  //   "anthropic" → Anthropic native        (POST /v1/messages, x-api-key header)
+  //   "gemini"    → Google Gemini native    (POST /v1beta/models/.../generateContent) — reserved
+  format: text("format").notNull().default("openai"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

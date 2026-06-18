@@ -55,7 +55,24 @@ export async function PUT(
     );
   }
 
-  const { name, prefix, baseUrl, apiKey, models, enabled, type } = body;
+  const { name, prefix, baseUrl, apiKey, models, enabled, type, format } = body as {
+    name?: string;
+    prefix?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    models?: string[];
+    enabled?: boolean;
+    type?: string;
+    format?: string;
+  };
+
+  // Validate format if provided
+  if (format !== undefined && !["openai", "anthropic", "gemini"].includes(format)) {
+    return NextResponse.json(
+      { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', or 'gemini'.` },
+      { status: 400 }
+    );
+  }
 
   const existing = db.select().from(providers).where(eq(providers.id, id)).get();
   if (!existing) {
@@ -96,6 +113,7 @@ export async function PUT(
     models: models ? JSON.stringify(models) : existing.models,
     enabled: enabled !== undefined ? enabled : existing.enabled,
     type: type ?? existing.type,
+    format: format ?? (existing as { format?: string }).format ?? "openai",
     updatedAt: new Date().toISOString(),
   };
 

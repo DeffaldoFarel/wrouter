@@ -111,6 +111,22 @@ export function initializeDatabase() {
     // Column already exists, ignore
   }
 
+  // Migration: add format column to providers if not exists
+  // format = upstream API dialect: "openai" (default) | "anthropic" | "gemini"
+  try {
+    sqlite.exec(`ALTER TABLE providers ADD COLUMN format TEXT NOT NULL DEFAULT 'openai'`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Auto-detect format for known native endpoints (existing rows only)
+  try {
+    sqlite.exec(`UPDATE providers SET format='anthropic' WHERE base_url LIKE '%anthropic.com%' AND format='openai'`);
+    sqlite.exec(`UPDATE providers SET format='gemini' WHERE base_url LIKE '%generativelanguage.googleapis.com%' AND format='openai'`);
+  } catch {
+    // ignore
+  }
+
   // Mark known aggregators (OpenRouter-style: baseUrl contains openrouter.ai)
   try {
     sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%openrouter.ai%' AND type='custom'`);
