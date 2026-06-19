@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
-// Set encryption key BEFORE importing the module so getEncryptionKey() works
-process.env.ENCRYPTION_KEY = 'test-key-for-unit-tests';
+// Set encryption key BEFORE importing the module so getEncryptionKey() works.
+// Use a 64-char hex string (32 bytes) so it's used directly as raw key,
+// bypassing the scrypt/JWT_SECRET derivation path.
+process.env.ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 import {
   encrypt,

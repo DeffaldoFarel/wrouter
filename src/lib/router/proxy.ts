@@ -185,6 +185,7 @@ export async function proxyWithFallback(
           apiKeyId: apiKeyId || null,
           latencyMs,
           status: "success",
+          isStreaming: false,
           tokensIn,
           tokensOut,
           requestDetail,
@@ -215,6 +216,7 @@ export async function proxyWithFallback(
         apiKeyId: apiKeyId || null,
         latencyMs,
         status: "fallback",
+        isStreaming: false,
         error: lastError.message,
         requestDetail,
         responseDetail: JSON.stringify({ status: response.status, error: errorText.slice(0, 2000) }),
@@ -238,6 +240,7 @@ export async function proxyWithFallback(
         apiKeyId: apiKeyId || null,
         latencyMs,
         status: "error",
+        isStreaming: false,
         error: lastError.message,
         requestDetail,
         responseDetail: JSON.stringify({ error: lastError.message }),
@@ -405,6 +408,7 @@ export async function proxyStreamWithFallback(
           apiKeyId: apiKeyId || null,
           latencyMs,
           status: "fallback",
+          isStreaming: true,
           error: lastError.message,
           requestDetail,
           responseDetail: JSON.stringify({ stream: true, status: response.status, error: errorText.slice(0, 2000) }),
@@ -500,12 +504,17 @@ export async function proxyStreamWithFallback(
         }
       }
 
+      // Shared reference so cancel() can signal the reader to stop.
+      // When client disconnects, cancel() calls reader.cancel() which causes
+      // reader.read() to throw, triggering the finally block that decrements activeJobs.
+      let _reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
       const tappedStream = new ReadableStream({
         async start(streamController) {
-          const reader = originalStream.getReader();
+          _reader = originalStream.getReader();
           try {
             while (true) {
-              const { done, value } = await reader.read();
+              const { done, value } = await _reader.read();
               if (done) {
                 // Flush any remaining buffer content
                 if (sseBuffer.startsWith("data: ") && sseBuffer.trim() !== "data: [DONE]") {
@@ -541,7 +550,8 @@ export async function proxyStreamWithFallback(
               streamController.enqueue(value);
             }
           } finally {
-            reader.releaseLock();
+            _reader.releaseLock();
+            _reader = null;
 
             // FALLBACK: If upstream did not return usage, estimate it locally
             // using gpt-tokenizer on the request messages and accumulated content.
@@ -580,7 +590,9 @@ export async function proxyStreamWithFallback(
               }
             }
 
-            streamController.close();
+            try {
+              streamController.close();
+            } catch { /* stream may already be closed/cancelled */ }
 
             // Log after stream completes — use total duration, not time-to-first-byte
             const totalDuration = Date.now() - startTime;
@@ -590,10 +602,20 @@ export async function proxyStreamWithFallback(
               apiKeyId: apiKeyId || null,
               latencyMs: totalDuration,
               status: "success",
+              isStreaming: true,
               tokensIn,
               tokensOut,
               requestDetail,
-              responseDetail: JSON.stringify({ stream: true, tokensIn, tokensOut, latencyMs: totalDuration, usageSource }),
+              responseDetail: JSON.stringify({
+                stream: true,
+                tokensIn,
+                tokensOut,
+                latencyMs: totalDuration,
+                usageSource,
+                contentPreview: accumulatedContent.slice(0, 500),
+                hasContent: accumulatedContent.length > 0,
+                totalContentChars: accumulatedContent.length,
+              }),
             });
             logger.info({
               model: target.model,
@@ -609,6 +631,12 @@ export async function proxyStreamWithFallback(
             decrementActiveJobs();
           }
         },
+        async cancel(_reason) {
+          // Client disconnected — cancel the upstream reader so reader.read() throws
+          // and the finally block runs to decrement activeJobs.
+          logger.debug({ provider: target.providerName, reason: String(_reason) }, "Stream cancelled by client");
+          _reader?.cancel();
+        },
       });
 
       handedOff = true;
@@ -622,6 +650,7 @@ export async function proxyStreamWithFallback(
         apiKeyId: apiKeyId || null,
         latencyMs,
         status: "error",
+        isStreaming: true,
         error: lastError.message,
         requestDetail,
         responseDetail: JSON.stringify({ stream: true, error: lastError.message }),

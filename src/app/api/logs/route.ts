@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
       tokensOut: requestLogs.tokensOut,
       latencyMs: requestLogs.latencyMs,
       status: requestLogs.status,
+      isStreaming: requestLogs.isStreaming,
       error: requestLogs.error,
       requestDetail: requestLogs.requestDetail,
       responseDetail: requestLogs.responseDetail,

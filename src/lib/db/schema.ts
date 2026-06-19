@@ -54,6 +54,7 @@ export const requestLogs = sqliteTable("request_logs", {
   tokensOut: integer("tokens_out"),
   latencyMs: integer("latency_ms"),
   status: text("status").notNull(), // success | error | fallback
+  isStreaming: integer("is_streaming", { mode: "boolean" }).notNull().default(false),
   error: text("error"),
   requestDetail: text("request_detail"), // JSON: full request body
   responseDetail: text("response_detail"), // JSON: full response body from provider
@@ -64,6 +65,7 @@ export const requestLogs = sqliteTable("request_logs", {
   apiKeyIdIdx: index("api_key_id_idx").on(table.apiKeyId),
   modelIdx: index("model_idx").on(table.model),
   statusIdx: index("status_idx").on(table.status),
+  isStreamingIdx: index("is_streaming_idx").on(table.isStreaming),
   // Composite indexes for complex queries
   timestampStatusIdx: index("timestamp_status_idx").on(table.timestamp, table.status),
 }));

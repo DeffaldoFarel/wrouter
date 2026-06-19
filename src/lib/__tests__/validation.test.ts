@@ -72,11 +72,11 @@ describe('validateChatRequest()', () => {
     expect(result.errors!.some(e => /at least 1/i.test(e))).toBe(true);
   });
 
-  it('fails when messages has more than 200 items', () => {
-    const msgs = Array.from({ length: 201 }, () => ({ role: 'user', content: 'hi' }));
+  it('fails when messages has more than 1000 items', () => {
+    const msgs = Array.from({ length: 1001 }, () => ({ role: 'user', content: 'hi' }));
     const result = validateChatRequest({ ...validRequest, messages: msgs });
     expect(result.valid).toBe(false);
-    expect(result.errors!.some(e => /max 200/i.test(e))).toBe(true);
+    expect(result.errors!.some(e => /max 1000/i.test(e))).toBe(true);
   });
 
   it('fails when a message has an invalid role', () => {

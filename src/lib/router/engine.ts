@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { providers, combos, requestLogs } from "../db/schema";
+import { providers, combos, requestLogs, apiKeys } from "../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { safeDecryptApiKey } from "../crypto";
@@ -374,6 +374,7 @@ export function logRequest(params: {
   tokensOut?: number;
   latencyMs: number;
   status: "success" | "error" | "fallback";
+  isStreaming?: boolean;
   error?: string;
   requestDetail?: string | null;
   responseDetail?: string | null;
@@ -389,6 +390,7 @@ export function logRequest(params: {
     tokensOut: params.tokensOut || null,
     latencyMs: params.latencyMs,
     status: params.status,
+    isStreaming: params.isStreaming ?? false,
     error: params.error || null,
     requestDetail: params.requestDetail || null,
     responseDetail: params.responseDetail || null,
@@ -405,6 +407,13 @@ export function logRequest(params: {
     tokensOut: params.tokensOut,
   }, "Request logged to DB");
 
-  // Push to SSE subscribers
-  notifySSE({ type: "log", data: entry });
+  // Resolve API key name for SSE event (so real-time UI shows name, not "(deleted)")
+  let apiKeyName: string | null = null;
+  if (entry.apiKeyId) {
+    const keyRow = db.select({ name: apiKeys.name }).from(apiKeys).where(eq(apiKeys.id, entry.apiKeyId)).get();
+    apiKeyName = keyRow?.name ?? null;
+  }
+
+  // Push to SSE subscribers (include resolved apiKeyName for real-time display)
+  notifySSE({ type: "log", data: { ...entry, apiKeyName } });
 }

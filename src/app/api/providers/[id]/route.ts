@@ -2,22 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
-import { verifySession } from "@/lib/auth/session";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import { validateProviderUpdate } from "@/lib/validation";
 import { encrypt, isEncrypted, safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
 import { invalidateProviderCache } from "@/lib/router/engine";
 
-function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
-}
-
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

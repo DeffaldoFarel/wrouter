@@ -77,9 +77,22 @@ export async function GET(req: NextRequest) {
   const now = new Date();
   const hourly = USE_HOURLY.has(filter);
 
-  // --- Fetch all data upfront ---
+  // --- Fetch only the columns needed for aggregation (skip large JSON columns) ---
   const logs = db
-    .select()
+    .select({
+      id: requestLogs.id,
+      timestamp: requestLogs.timestamp,
+      model: requestLogs.model,
+      providerId: requestLogs.providerId,
+      comboId: requestLogs.comboId,
+      apiKeyId: requestLogs.apiKeyId,
+      tokensIn: requestLogs.tokensIn,
+      tokensOut: requestLogs.tokensOut,
+      latencyMs: requestLogs.latencyMs,
+      status: requestLogs.status,
+      isStreaming: requestLogs.isStreaming,
+      error: requestLogs.error,
+    })
     .from(requestLogs)
     .where(gte(requestLogs.timestamp, startDate.toISOString()))
     .all();
@@ -142,6 +155,8 @@ export async function GET(req: NextRequest) {
   let totalTokensOut = 0;
   let totalLatency = 0;
   let latencyCount = 0;
+  let streamingRequests = 0;
+  let nonStreamingRequests = 0;
 
   // --- Normalize model name helper ---
   const normalizeModel = (raw: string): string => {
@@ -169,6 +184,11 @@ export async function GET(req: NextRequest) {
     if (log.latencyMs) {
       totalLatency += log.latencyMs;
       latencyCount++;
+    }
+    if (log.isStreaming) {
+      streamingRequests++;
+    } else {
+      nonStreamingRequests++;
     }
 
     // ── Time buckets ──
@@ -262,7 +282,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     filter,
     hourly,
-    summary: { totalRequests: logs.length, totalErrors, totalTokensIn, totalTokensOut, avgLatency },
+    summary: { totalRequests: logs.length, totalErrors, totalTokensIn, totalTokensOut, avgLatency, streamingRequests, nonStreamingRequests },
     requestsPerPeriod,
     tokenUsagePerPeriod,
     perProviderBreakdown,

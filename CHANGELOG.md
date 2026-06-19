@@ -5,6 +5,27 @@ All notable changes to WRouter will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-06-20
+
+### 🐛 Fixed
+- **API Key "(deleted)" in Real-time** — SSE events now include resolved `apiKeyName` (was showing "(deleted)" for recent requests until page refresh)
+- **React Hooks Violation** — Moved `useMemo` hooks before early returns in Usage page (fixed "Rendered more hooks than during the previous render" error)
+- **JSON.parse Crash** — Added try/catch for `allowedModels` JSON parsing in API keys route (prevents crash on corrupt DB data)
+- **Keys Stats Performance** — DB-level filtering with `and(eq, gte)` instead of loading all logs then filtering in JS
+- **Restore Cache Staleness** — Database restore now invalidates in-memory provider cache and sends SSE `reload` event to connected clients
+- **Settings Non-string Values** — Auto-coerce boolean/number values instead of silently skipping them
+
+### ⚡ Performance
+- **SSE Full Refetch Removed** — Each real-time log event no longer triggers 3 API calls (`/api/usage`, `/api/logs`, `/api/providers`) — ~90% reduction in network traffic during high-traffic periods
+- **Selective Column Fetch** — `/api/usage` now only selects columns needed for aggregation (skips large `requestDetail`/`responseDetail` JSON) — ~60% less memory
+- **Memoized Computations** — `providerMap`, status counts, and `loadMoreLogs` callback now properly memoized for smoother renders
+- **Provider Map Memoization** — `useMemo` prevents recomputation on every render
+- **Status Counts Single-pass** — Combined 3 array scans into one `useMemo` pass
+
+### 🔧 Refactored
+- **Shared Auth Helper** — Extracted duplicated `checkAuth()` from 12+ route files into `checkDashboardAuth()` in `lib/auth/session.ts`
+- **Routes Updated** — `keys`, `keys/[id]`, `keys/[id]/stats`, `combos`, `settings`, `backup`, `restore`, `events`, `health`, `reset`, `providers`, `providers/[id]` all use shared auth helper
+
 ## [1.4.0] - 2026-06-19
 
 ### ✨ Added

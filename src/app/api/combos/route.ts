@@ -3,15 +3,10 @@ import { db } from "@/lib/db";
 import { combos } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { verifySession } from "@/lib/auth/session";
-
-function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
-}
+import { checkDashboardAuth } from "@/lib/auth/session";
 
 export async function GET(req: NextRequest) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -25,7 +20,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -97,3 +97,14 @@ export function verifyApiKey(apiKey: string): { id: string; allowedModels: strin
   const allowedModels = JSON.parse(result.allowedModels || "[]");
   return { id: result.id, allowedModels };
 }
+
+/**
+ * Check dashboard session auth from a NextRequest cookie.
+ * Returns the session token if valid, null otherwise.
+ * Usage: `const token = checkDashboardAuth(req); if (!token) return unauthorized();`
+ */
+export function checkDashboardAuth(req: { cookies: { get: (name: string) => { value?: string } | undefined } }): string | null {
+  const token = req.cookies.get("session_token")?.value;
+  if (!token || !verifySession(token)) return null;
+  return token;
+}

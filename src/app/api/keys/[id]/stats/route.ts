@@ -1,19 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requestLogs, apiKeys } from "@/lib/db/schema";
-import { eq, gte } from "drizzle-orm";
-import { verifySession } from "@/lib/auth/session";
+import { eq, gte, and } from "drizzle-orm";
+import { checkDashboardAuth } from "@/lib/auth/session";
 
-function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
+function getStartDate(f: string): Date {
+  const now = new Date();
+  switch (f) {
+    case "today": { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }
+    case "24h":  return new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    case "7d":   return new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000);
+    case "30d":  return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    default:     return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  }
 }
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -27,25 +33,19 @@ export async function GET(
 
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter") || "30d";
-
-  function getStartDate(f: string): Date {
-    const now = new Date();
-    switch (f) {
-      case "today": { const d = new Date(now); d.setHours(0, 0, 0, 0); return d; }
-      case "24h":  return new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      case "7d":   return new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000);
-      case "30d":  return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      default:     return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    }
-  }
-
   const startDate = getStartDate(filter);
+
+  // Filter at DB level using both conditions (uses timestamp_idx + api_key_id_idx)
   const logs = db
     .select()
     .from(requestLogs)
-    .where(eq(requestLogs.apiKeyId, id))
-    .all()
-    .filter((l) => l.timestamp >= startDate.toISOString());
+    .where(
+      and(
+        eq(requestLogs.apiKeyId, id),
+        gte(requestLogs.timestamp, startDate.toISOString())
+      )
+    )
+    .all();
 
   const totalRequests = logs.length;
   const totalErrors   = logs.filter((l) => l.status === "error").length;

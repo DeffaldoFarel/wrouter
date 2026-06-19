@@ -69,6 +69,7 @@ interface LogEntry {
   tokensOut: number | null;
   latencyMs: number | null;
   status: string;
+  isStreaming: boolean;
   error: string | null;
   requestDetail?: string | null;
   responseDetail?: string | null;
@@ -706,6 +707,23 @@ function LogDetailSheet({
                   )}
                 </div>
               </div>
+              <div className="space-y-0.5">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+                  Response Type
+                </p>
+                <div className="flex items-center gap-1.5">
+                  {log.isStreaming ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-400">
+                      <Zap className="h-3.5 w-3.5" />
+                      Streaming (SSE)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-500/10 px-2.5 py-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                      Non-Streaming (JSON)
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -853,6 +871,26 @@ function LogDetailSheet({
                   })()}
                 </pre>
               </div>
+              {/* Streaming content preview */}
+              {log.isStreaming && (() => {
+                try {
+                  const rd = JSON.parse(log.responseDetail!);
+                  if (rd.contentPreview && rd.hasContent) {
+                    return (
+                      <div className="mt-3 rounded-md border bg-muted/20 p-3">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold mb-1.5">
+                          Response Content Preview ({rd.totalContentChars ?? rd.contentPreview.length} chars)
+                        </p>
+                        <pre className="text-xs font-mono whitespace-pre-wrap break-all text-foreground max-h-[400px] overflow-y-auto leading-relaxed">
+                          {rd.contentPreview}
+                          {(rd.totalContentChars ?? rd.contentPreview.length) > 500 ? "\n\n... (truncated, first 500 chars shown)" : ""}
+                        </pre>
+                      </div>
+                    );
+                  }
+                } catch { /* ignore */ }
+                return null;
+              })()}
               <button
                 type="button"
                 onClick={() => {
@@ -898,6 +936,7 @@ export default function UsagePage() {
 
   const [activeProviderIds, setActiveProviderIds] = useState<Set<string>>(new Set());
   const activeTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const logsLengthRef = useRef(0);
 
   const tooltipStyle = {
     backgroundColor: cardBg,
@@ -908,20 +947,23 @@ export default function UsagePage() {
     boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
   };
 
-  // Build provider ID → name map
-  const providerMap: Record<string, string> = {};
-  if (usage?.canvasProviders) {
-    for (const p of usage.canvasProviders) {
-      providerMap[p.id] = p.name;
-    }
-  }
-  if (usage?.perProviderBreakdown) {
-    for (const p of usage.perProviderBreakdown) {
-      if (!providerMap[p.providerId]) {
-        providerMap[p.providerId] = p.name;
+  // Build provider ID → name map (memoized to avoid recomputation on every render)
+  const providerMap: Record<string, string> = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (usage?.canvasProviders) {
+      for (const p of usage.canvasProviders) {
+        map[p.id] = p.name;
       }
     }
-  }
+    if (usage?.perProviderBreakdown) {
+      for (const p of usage.perProviderBreakdown) {
+        if (!map[p.providerId]) {
+          map[p.providerId] = p.name;
+        }
+      }
+    }
+    return map;
+  }, [usage?.canvasProviders, usage?.perProviderBreakdown]);
 
   const PAGE_SIZE = 50;
 
@@ -954,12 +996,13 @@ export default function UsagePage() {
   }, []);
 
   // Load more: append older logs from server (offset = current count)
+  // Uses ref for offset to avoid recreating callback on every SSE log addition
   const loadMoreLogs = useCallback(async () => {
     if (loadingMore) return;
     setLoadingMore(true);
     try {
       const res = await fetch(
-        `/api/logs?limit=${PAGE_SIZE}&offset=${logs.length}`
+        `/api/logs?limit=${PAGE_SIZE}&offset=${logsLengthRef.current}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -978,7 +1021,7 @@ export default function UsagePage() {
     } finally {
       setLoadingMore(false);
     }
-  }, [logs.length, logsTotal, loadingMore]);
+  }, [loadingMore, logsTotal]);
 
   // SSE connection
   useEffect(() => {
@@ -1037,10 +1080,13 @@ export default function UsagePage() {
               return [newLog, ...p].slice(0, 500);
             });
             setLogsTotal((t) => t + 1);
-            setFilter((cur) => {
-              fetchAll(cur);
-              return cur;
-            });
+          }
+          if (msg.type === "reload") {
+            // Database was restored — clear local state and refetch everything
+            setLogs([]);
+            setLogsTotal(0);
+            setUsage(null);
+            setFilter((cur) => cur); // trigger refetch
           }
         } catch {
           /* ignore */
@@ -1073,11 +1119,29 @@ export default function UsagePage() {
     fetchAll(filter);
   }, [filter, fetchAll]);
 
+  // Keep logsLengthRef in sync (avoids stale closure in loadMoreLogs)
+  useEffect(() => {
+    logsLengthRef.current = logs.length;
+  }, [logs.length]);
+
   // Filter logs by status
   const filteredLogs = useMemo(() => {
     if (statusFilter === "all") return logs;
     return logs.filter((l) => l.status === statusFilter);
   }, [logs, statusFilter]);
+
+  // Memoized status counts (avoid scanning logs array on every render)
+  const statusCounts = useMemo(() => {
+    let success = 0;
+    let errors = 0;
+    let fallbacks = 0;
+    for (const l of logs) {
+      if (l.status === "success") success++;
+      else if (l.status === "error") errors++;
+      else if (l.status === "fallback") fallbacks++;
+    }
+    return { success, errors, fallbacks };
+  }, [logs]);
 
   // Export logs as CSV
   function exportCSV() {
@@ -1134,10 +1198,6 @@ export default function UsagePage() {
     s && s.totalRequests > 0
       ? `${((s.totalErrors / s.totalRequests) * 100).toFixed(1)}% error rate`
       : undefined;
-
-  const successCount = logs.filter((l) => l.status === "success").length;
-  const errorCount = logs.filter((l) => l.status === "error").length;
-  const fallbackCount = logs.filter((l) => l.status === "fallback").length;
 
   return (
     <div className="space-y-6">
@@ -1446,9 +1506,9 @@ export default function UsagePage() {
                     {(
                       [
                         { value: "all", label: "All", count: logs.length },
-                        { value: "success", label: "Success", count: successCount },
-                        { value: "error", label: "Error", count: errorCount },
-                        { value: "fallback", label: "Fallback", count: fallbackCount },
+                        { value: "success", label: "Success", count: statusCounts.success },
+                        { value: "error", label: "Error", count: statusCounts.errors },
+                        { value: "fallback", label: "Fallback", count: statusCounts.fallbacks },
                       ] as const
                     ).map((s) => (
                       <button
@@ -1515,6 +1575,9 @@ export default function UsagePage() {
                         </TableHead>
                         <TableHead className="text-xs font-semibold uppercase tracking-wide">
                           Model
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold uppercase tracking-wide text-center">
+                          Type
                         </TableHead>
                         <TableHead className="text-xs font-semibold uppercase tracking-wide">
                           Status
@@ -1585,6 +1648,18 @@ export default function UsagePage() {
                               <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded text-muted-foreground max-w-[180px] block truncate">
                                 {normalizeModel(log.model)}
                               </span>
+                            </TableCell>
+                            <TableCell className="py-2.5 text-center">
+                              {log.isStreaming ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
+                                  <Zap className="h-3 w-3" />
+                                  Stream
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                  Non-Stream
+                                </span>
+                              )}
                             </TableCell>
                             <TableCell className="py-2.5">
                               <StatusPill status={log.status} />

@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySession } from "@/lib/auth/session";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import path from "path";
 import fs from "fs";
-
-function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
-}
+import { invalidateProviderCache } from "@/lib/router/engine";
+import { notifySubscribers } from "@/app/api/events/route";
 
 export async function POST(req: NextRequest) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -55,6 +52,12 @@ export async function POST(req: NextRequest) {
       // Backup from uploaded file → live database
       await source.backup(dbPath);
       source.close();
+
+      // Invalidate in-memory caches so next request reads fresh data
+      invalidateProviderCache();
+
+      // Notify SSE clients to reload their data
+      notifySubscribers({ type: "reload" });
 
       return NextResponse.json({
         success: true,

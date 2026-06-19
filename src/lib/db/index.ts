@@ -155,6 +155,13 @@ export function initializeDatabase() {
     // Column already exists, ignore
   }
 
+  // Migration: add is_streaming column to request_logs if not exists
+  try {
+    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN is_streaming INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists, ignore
+  }
+
   // Seed default settings if not exist
   const defaultSettings = [
     { key: "password", value: bcrypt.hashSync("qwertyui", 10) },

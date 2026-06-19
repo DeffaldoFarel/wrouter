@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requestLogs, providers, apiKeys, combos, settings } from "@/lib/db/schema";
-import { verifySession } from "@/lib/auth/session";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import { ne, eq } from "drizzle-orm";
 import { resetLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 import bcrypt from "bcryptjs";
 
 const DEFAULT_PASSWORD = "qwertyui";
-
-function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
-}
 
 export async function POST(req: NextRequest) {
   // Rate limit: 3 reset attempts per minute per IP
@@ -21,7 +16,7 @@ export async function POST(req: NextRequest) {
     return rateLimitResponse(limitCheck.retryAfter);
   }
 
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -1,18 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
-import { verifySession } from "@/lib/auth/session";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import { safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
 
-function isAuthenticated(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  if (!token) return false;
-  return verifySession(token);
-}
-
 export async function GET(req: NextRequest) {
-  if (!isAuthenticated(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ status: "ok" });
   }
 

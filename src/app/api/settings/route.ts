@@ -2,15 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { verifySession, hashPassword } from "@/lib/auth/session";
-
-function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
-}
+import { verifySession, hashPassword, checkDashboardAuth } from "@/lib/auth/session";
 
 export async function GET(req: NextRequest) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -29,7 +24,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -39,7 +34,22 @@ export async function PUT(req: NextRequest) {
 
     for (const [key, value] of Object.entries(body)) {
       if (!allowedKeys.includes(key)) continue;
-      if (typeof value !== "string") continue;
+      if (typeof value !== "string") {
+        // Silently skip non-string values (allowed keys are all stored as strings)
+        // but coerce booleans and numbers that clients might send
+        if (typeof value === "boolean" || typeof value === "number") {
+          // Auto-coerce: true → "true", 30 → "30"
+          const coerced = String(value);
+          const storedValue = key === "password" ? hashPassword(coerced) : coerced;
+          const existing = db.select().from(settings).where(eq(settings.key, key)).get();
+          if (existing) {
+            db.update(settings).set({ value: storedValue }).where(eq(settings.key, key)).run();
+          } else {
+            db.insert(settings).values({ key, value: storedValue }).run();
+          }
+        }
+        continue;
+      }
 
       // Hash password before storing
       const storedValue = key === "password" ? hashPassword(value) : value;
