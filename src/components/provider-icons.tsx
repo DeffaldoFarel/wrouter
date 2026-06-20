@@ -24,6 +24,8 @@ import Together from "@lobehub/icons/es/Together";
 import Fireworks from "@lobehub/icons/es/Fireworks";
 import Aws from "@lobehub/icons/es/Aws";
 import AiStudio from "@lobehub/icons/es/AiStudio";
+import Qwen from "@lobehub/icons/es/Qwen";
+import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo";
 
 // ─── Legacy re-exports for backward compat ───
 
@@ -101,6 +103,8 @@ const ICON_REGISTRY: Record<string, IconEntry> = {
   together: { icon: Together, label: "Together" },
   fireworks: { icon: Fireworks, label: "Fireworks" },
   aws: { icon: Aws, label: "AWS" },
+  mimo: { icon: XiaomiMiMo, label: "MiMo" },
+  qwen: { icon: Qwen, label: "Qwen" },
 };
 
 /** Prefixes that have a brand icon defined. */

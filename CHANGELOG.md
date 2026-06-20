@@ -5,6 +5,33 @@ All notable changes to WRouter will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-21
+
+### 🚀 New Features
+- **MiMo Provider** — Added Xiaomi MiMo as API Key Provider (OpenAI-compatible, `api.xiaomimimo.com`)
+- **Qwen Provider** — Added Alibaba Qwen Cloud as API Key Provider (OpenAI-compatible, `dashscope-intl.aliyuncs.com`)
+- **Cost Tracking in Usage Page** — Cost column in recent requests table + cost in request detail panel
+- **Provider-Reported Cost** — Prioritize actual cost from provider response (`usage.cost` / `usage.total_cost`), fallback to internal estimation
+- **Interactive Connection Map** — Pan, zoom, fit view, and lock view controls
+- **Split Custom Provider Buttons** — Separate "Add Anthropic Compatible" and "Add OpenAI Compatible" buttons
+
+### 🏗️ Architecture
+- **Raw Fetch Only (9router-style)** — Removed SDK adapter from proxy path; all providers use raw `fetch` for full response fidelity (usage, cost, reasoning_tokens preserved)
+- **Google GenAI Raw Fetch** — Request/response translation (OpenAI ↔ Gemini format) without SDK dependency
+- **Anthropic Raw Fetch** — Existing translator handles format conversion without SDK
+
+### 🐛 Fixed
+- **SDK Stream Usage = 0/0** — Fixed race condition where SDK usage Promise resolved before stream consumed (OpenRouter SDK stripped `usage.cost` field)
+- **Cost Not Displayed** — Added `costUsd` to `/api/logs` response and Usage page table
+- **Connection Map Controls Not Clickable** — Moved toolbar outside ReactFlow canvas with `z-10`
+- **ReactFlow Controls Dark Mode** — Custom zoom buttons with Tailwind CSS variables instead of ReactFlow default white buttons
+
+### 🎨 UI Changes
+- **Custom Providers at Top** — Moved Custom Providers section above OAuth and API Key Providers
+- **Usage Page Initial Load** — Reduced from 50 to 20 recent requests for faster load
+- **Connection Map Edge Visibility** — Improved opacity (0.85 for enabled, 0.5 for offline) and stroke width
+- **Controls Toolbar** — Single toolbar on left: Zoom In, Zoom Out, Fit View, Lock View
+
 ## [1.5.0] - 2026-06-20
 
 ### 🐛 Fixed

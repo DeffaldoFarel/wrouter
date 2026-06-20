@@ -9,9 +9,10 @@ import {
   type Edge,
   Handle,
   Position,
+  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Zap, Server, Activity } from "lucide-react";
+import { Zap, Server, Activity, Lock, Unlock, Maximize2 } from "lucide-react";
 import { getProviderIcon } from "@/components/provider-icons";
 
 interface CanvasProvider {
@@ -255,10 +256,10 @@ function buildGraph(
       className: provider.active ? "wrouter-edge-active" : "wrouter-edge-idle",
       style: {
         stroke: provider.active ? activeEdgeColor : edgeColor,
-        strokeWidth: 3,
-        strokeDasharray: provider.active ? "14 10" : provider.enabled ? "10 8" : "6 6",
+        strokeWidth: provider.active ? 3.5 : 2.5,
+        strokeDasharray: provider.active ? "12 8" : provider.enabled ? "8 6" : "5 5",
         strokeLinecap: "butt",
-        opacity: provider.active ? 1 : provider.enabled ? 0.7 : 0.35,
+        opacity: provider.active ? 1 : provider.enabled ? 0.85 : 0.5,
       },
     });
     // Suppress unused-var warning for `index`
@@ -298,10 +299,10 @@ function buildGraph(
       className: provider.active ? "wrouter-edge-active" : "wrouter-edge-idle",
       style: {
         stroke: provider.active ? activeEdgeColor : edgeColor,
-        strokeWidth: 3,
-        strokeDasharray: provider.active ? "14 10" : provider.enabled ? "10 8" : "6 6",
+        strokeWidth: provider.active ? 3.5 : 2.5,
+        strokeDasharray: provider.active ? "12 8" : provider.enabled ? "8 6" : "5 5",
         strokeLinecap: "butt",
-        opacity: provider.active ? 1 : provider.enabled ? 0.7 : 0.35,
+        opacity: provider.active ? 1 : provider.enabled ? 0.85 : 0.5,
       },
     });
     void index;
@@ -324,12 +325,36 @@ function resolveColor(cssVar: string, fallback: string): string {
 //  Main Canvas
 // ─────────────────────────────────────────────
 
+// Custom zoom controls rendered inside ReactFlow (has access to useReactFlow)
+// Store fitView callback via a ref so the parent can call it
+let fitViewCallback: (() => void) | null = null;
+let zoomInCallback: (() => void) | null = null;
+let zoomOutCallback: (() => void) | null = null;
+
+// Internal component that registers fitView with the outer ref
+function ReactFlowControls() {
+  const { fitView, zoomIn, zoomOut } = useReactFlow();
+  useEffect(() => {
+    fitViewCallback = () => fitView({ padding: 0.35, duration: 200 });
+    zoomInCallback = () => zoomIn();
+    zoomOutCallback = () => zoomOut();
+    return () => {
+      fitViewCallback = null;
+      zoomInCallback = null;
+      zoomOutCallback = null;
+    };
+  }, [fitView, zoomIn, zoomOut]);
+  return null;
+}
+
 export function ProviderCanvas({ providers, activeJobs = 0 }: ProviderCanvasProps) {
-  const [edgeColor, setEdgeColor] = useState("#94a3b8");
-  const [activeEdgeColor, setActiveEdgeColor] = useState("#22c55e");
+  const [edgeColor, setEdgeColor] = useState("#64748b");
+  const [activeEdgeColor, setActiveEdgeColor] = useState("#10b981");
   const [bgDotColor, setBgDotColor] = useState("#3a3a3a");
   const [isDark, setIsDark] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const reactFlowInstance = useRef<ReturnType<typeof useReactFlow> | null>(null);
 
   useEffect(() => {
     function updateColors() {
@@ -426,10 +451,10 @@ export function ProviderCanvas({ providers, activeJobs = 0 }: ProviderCanvasProp
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
-        panOnDrag={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
-        zoomOnDoubleClick={false}
+        panOnDrag={!isLocked}
+        zoomOnScroll={!isLocked}
+        zoomOnPinch={!isLocked}
+        zoomOnDoubleClick={!isLocked}
         preventScrolling={false}
         proOptions={{ hideAttribution: true }}
         style={{ background: "transparent" }}
@@ -441,7 +466,60 @@ export function ProviderCanvas({ providers, activeJobs = 0 }: ProviderCanvasProp
           color={bgDotColor}
           style={{ opacity: 0.5 }}
         />
+        <ReactFlowControls />
       </ReactFlow>
+
+      {/* Controls toolbar - outside ReactFlow so buttons are clickable */}
+      <div className="absolute bottom-3 left-3 flex flex-col gap-0 bg-background/90 backdrop-blur-sm border rounded-md overflow-hidden shadow-sm z-10">
+        {/* Zoom In */}
+        <button
+          title="Zoom in"
+          className="flex items-center justify-center h-8 w-8 hover:bg-accent transition-colors"
+          onClick={() => zoomInCallback?.()}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <line x1="11" y1="8" x2="11" y2="14" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+        </button>
+        <div className="h-px bg-border" />
+        {/* Zoom Out */}
+        <button
+          title="Zoom out"
+          className="flex items-center justify-center h-8 w-8 hover:bg-accent transition-colors"
+          onClick={() => zoomOutCallback?.()}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+        </button>
+        <div className="h-px bg-border" />
+        {/* Fit View */}
+        <button
+          title="Fit view"
+          className="flex items-center justify-center h-8 w-8 hover:bg-accent transition-colors"
+          onClick={() => fitViewCallback?.()}
+        >
+          <Maximize2 size={16} className="text-muted-foreground" />
+        </button>
+        <div className="h-px bg-border" />
+        {/* Lock/Unlock */}
+        <button
+          title={isLocked ? "Unlock pan & zoom" : "Lock view"}
+          className="flex items-center justify-center h-8 w-8 hover:bg-accent transition-colors"
+          onClick={() => setIsLocked((l) => !l)}
+        >
+          {isLocked ? (
+            <Lock size={16} className="text-muted-foreground" />
+          ) : (
+            <Unlock size={16} className="text-muted-foreground" />
+          )}
+        </button>
+      </div>
 
       {/* Legend overlay */}
       <div className="absolute bottom-3 right-3 flex items-center gap-3 px-3 py-1.5 rounded-md bg-background/80 backdrop-blur-sm border text-[10px] text-muted-foreground">

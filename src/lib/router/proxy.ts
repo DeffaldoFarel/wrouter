@@ -4,6 +4,7 @@ import { estimateInputTokens, estimateOutputTokens, MessageLike } from "./token-
 import { extractUsage, hasMeaningfulUsage, NormalizedUsage } from "./usage-extractor";
 import { openaiToAnthropicRequest, anthropicToOpenaiResponse, translateAnthropicStream } from "./translator/anthropic";
 import type { ChatCompletionRequest } from "./proxy-types";
+import { sdkCall } from "./sdk-adapter";
 import logger from "@/lib/logger";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
@@ -97,6 +98,7 @@ export async function proxyWithFallback(
         let upstreamUsage: NormalizedUsage | null = null;
         let estimated = false;
         let parsedJson: Record<string, unknown> | null = null;
+        let providerCost: number | null = null;
 
         try {
           const json = await response.json();
@@ -104,6 +106,25 @@ export async function proxyWithFallback(
           responseJson = JSON.stringify(json);
           upstreamUsage = extractUsage(json);
         } catch { /* ignore parse errors — fall through to estimation */ }
+
+        // Extract provider-reported cost if available
+        // OpenRouter: usage.total_cost or usage.cost
+        // Some providers include it in the response body
+        if (parsedJson) {
+          const usage = parsedJson.usage as Record<string, unknown> | undefined;
+          if (usage) {
+            // OpenRouter uses total_cost
+            if (typeof usage.total_cost === "number" && usage.total_cost > 0) {
+              providerCost = usage.total_cost;
+            } else if (typeof usage.cost === "number" && usage.cost > 0) {
+              providerCost = usage.cost;
+            }
+          }
+          // Some providers put it at top-level (e.g. x-cost header parsed into body)
+          if (providerCost === null && typeof parsedJson.total_cost === "number") {
+            providerCost = parsedJson.total_cost as number;
+          }
+        }
 
         if (hasMeaningfulUsage(upstreamUsage)) {
           tokensIn = upstreamUsage!.prompt_tokens;
@@ -153,6 +174,42 @@ export async function proxyWithFallback(
           }
         }
 
+        // For Gemini providers, translate response → OpenAI shape
+        if (target.baseUrl.includes("generativelanguage.googleapis.com") && parsedJson) {
+          const candidates = (parsedJson.candidates as Array<Record<string, unknown>>) ?? [];
+          const candidate = candidates[0];
+          let textContent = "";
+          if (candidate?.content && typeof candidate.content === "object") {
+            const parts = (candidate.content as Record<string, unknown>).parts as Array<Record<string, unknown>> ?? [];
+            textContent = parts.map((p) => (typeof p.text === "string" ? p.text : "")).join("");
+          }
+          const usageMeta = parsedJson.usageMetadata as Record<string, unknown> | undefined;
+          parsedJson = {
+            id: `chatcmpl-${Date.now()}`,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: target.model,
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: textContent },
+              finish_reason: "stop",
+            }],
+            usage: {
+              prompt_tokens: usageMeta ? Number(usageMeta.promptTokenCount ?? 0) : 0,
+              completion_tokens: usageMeta ? Number(usageMeta.candidatesTokenCount ?? 0) : 0,
+              total_tokens: usageMeta ? Number(usageMeta.totalTokenCount ?? 0) : 0,
+            },
+          };
+          responseJson = JSON.stringify(parsedJson);
+          // Re-extract usage from translated body
+          const geminiUsage = extractUsage(parsedJson);
+          if (hasMeaningfulUsage(geminiUsage)) {
+            tokensIn = geminiUsage!.prompt_tokens;
+            tokensOut = geminiUsage!.completion_tokens;
+            estimated = false;
+          }
+        }
+
         // If we estimated OR translated (Anthropic), build a fresh Response with the
         // augmented body. Otherwise keep the original cloned response.
         let finalResponseForClient: Response = responseForClient;
@@ -191,6 +248,7 @@ export async function proxyWithFallback(
           tokensOut,
           requestDetail,
           responseDetail: responseJson,
+          providerCost,
         });
 
         logger.info({
@@ -288,6 +346,10 @@ async function forwardRequest(
   requestBody: ChatCompletionRequest,
   target: RoutingResult
 ): Promise<Response> {
+  // SDK adapter disabled — all providers use raw fetch for full response fidelity
+  // (usage, cost, reasoning_tokens etc. preserved without SDK stripping fields)
+
+  // Fallback to raw fetch
   const isAnthropic = target.format === "anthropic";
   const url = isAnthropic
     ? `${target.baseUrl.replace(/\/$/, "")}/messages`
@@ -339,6 +401,69 @@ async function forwardRequest(
 }
 
 /**
+ * Detect if a target should use the official SDK instead of raw fetch.
+ */
+function detectSdkType(target: RoutingResult): string | null {
+  const base = target.baseUrl.toLowerCase();
+  // Anthropic
+  if (base.includes("api.anthropic.com")) return "anthropic";
+  // OpenAI
+  if (base.includes("api.openai.com")) return "openai";
+  // OpenRouter
+  if (base.includes("openrouter.ai")) return "openrouter";
+  // DeepSeek
+  if (base.includes("api.deepseek.com")) return "deepseek";
+  // Google AI Studio (Gemini)
+  if (base.includes("generativelanguage.googleapis.com")) return "gemini";
+  // MiMo (OpenAI compatible)
+  if (base.includes("api.xiaomimimo.com")) return "mimo";
+  // Qwen (OpenAI compatible)
+  if (base.includes("dashscope-intl.aliyuncs.com")) return "qwen";
+  return null;
+}
+
+/**
+ * Convert SDK result to a Response object.
+ */
+function sdkResultToResponse(result: Awaited<ReturnType<typeof sdkCall>>): Response {
+  if (!result) throw new Error("SDK result is null");
+
+  if (result.type === "non-stream") {
+    return new Response(JSON.stringify(result.body), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Wrouter-Usage-Source": "sdk",
+      },
+    });
+  }
+
+  // Streaming
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const chunk of result.stream) {
+          controller.enqueue(new TextEncoder().encode(chunk));
+        }
+        controller.close();
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Wrouter-Usage-Source": "sdk",
+    },
+  });
+}
+
+/**
  * Forward a streaming request and return a ReadableStream.
  */
 export async function proxyStreamWithFallback(
@@ -358,15 +483,101 @@ export async function proxyStreamWithFallback(
       // Notify UI that a request is starting on this provider
       notifyRequestStart(target.providerId, target.providerName, target.model);
 
+      // SDK adapter disabled — all providers use raw fetch for full response fidelity
+      if (false) {
+        const sdkResult: any = null;
+        if (sdkResult && sdkResult.type === "stream") {
+          // Convert SDK stream to ReadableStream
+          // Log AFTER stream fully consumed (usage resolves only after stream ends)
+          const readableStream = new ReadableStream({
+            async start(controller) {
+              try {
+                for await (const chunk of sdkResult.stream) {
+                  controller.enqueue(new TextEncoder().encode(chunk));
+                }
+                controller.close();
+              } catch (err) {
+                controller.error(err);
+              }
+
+              // Now stream is done — usage promise should resolve
+              const usageData = await sdkResult.usage;
+              let tokensIn: number | undefined;
+              let tokensOut: number | undefined;
+              let sdkProviderCost: number | null = null;
+              if (usageData) {
+                tokensIn = usageData.inputTokens;
+                tokensOut = usageData.outputTokens;
+                if (typeof usageData.cost === "number" && usageData.cost > 0) {
+                  sdkProviderCost = usageData.cost;
+                } else if (typeof usageData.totalCost === "number" && usageData.totalCost > 0) {
+                  sdkProviderCost = usageData.totalCost;
+                }
+              }
+
+              const totalDuration = Date.now() - startTime;
+              logRequest({
+                model: target.model,
+                providerId: target.providerId,
+                apiKeyId: apiKeyId || null,
+                latencyMs: totalDuration,
+                status: "success",
+                isStreaming: true,
+                tokensIn,
+                tokensOut,
+                requestDetail,
+                providerCost: sdkProviderCost,
+                responseDetail: JSON.stringify({
+                  stream: true,
+                  tokensIn,
+                  tokensOut,
+                  usageSource: "sdk",
+                }),
+              });
+            },
+          });
+
+          return { stream: readableStream, providerId: target.providerId };
+        }
+      }
+
+      // Fallback to raw fetch
       const isAnthropic = target.format === "anthropic";
-      const url = isAnthropic
-        ? `${target.baseUrl.replace(/\/$/, "")}/messages`
-        : `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
+      const isGemini = target.baseUrl.includes("generativelanguage.googleapis.com");
+
+      let url: string;
+      if (isAnthropic) {
+        url = `${target.baseUrl.replace(/\/$/, "")}/messages`;
+      } else if (isGemini) {
+        const base = target.baseUrl.replace(/\/$/, "");
+        url = `${base}/models/${target.model}:streamGenerateContent?alt=sse&key=${target.apiKey}`;
+      } else {
+        url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
+      }
 
       let forwardBody: unknown;
       let headers: Record<string, string>;
 
-      if (isAnthropic) {
+      if (isGemini) {
+        // Convert OpenAI format → Gemini streaming format
+        const messages = (requestBody.messages ?? []) as Array<{ role: string; content: string }>;
+        const systemMsg = messages.find((m) => m.role === "system");
+        const chatMessages = messages.filter((m) => m.role !== "system");
+        const contents = chatMessages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+        }));
+        forwardBody = {
+          contents,
+          ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
+          generationConfig: {
+            ...(requestBody.temperature !== undefined ? { temperature: requestBody.temperature } : {}),
+            ...(requestBody.max_tokens !== undefined ? { maxOutputTokens: requestBody.max_tokens } : {}),
+            ...(requestBody.top_p !== undefined ? { topP: requestBody.top_p } : {}),
+          },
+        };
+        headers = { "Content-Type": "application/json" };
+      } else if (isAnthropic) {
         const anthropicReq = openaiToAnthropicRequest({
           ...requestBody,
           model: target.model,
@@ -475,6 +686,7 @@ export async function proxyStreamWithFallback(
       let usageFromUpstream = false;
       let accumulatedContent = "";
       let sseBuffer = "";
+      let streamProviderCost: number | null = null;
 
       function tryExtractUsage(json: unknown) {
         const u = extractUsage(json);
@@ -482,6 +694,21 @@ export async function proxyStreamWithFallback(
           tokensIn = u!.prompt_tokens;
           tokensOut = u!.completion_tokens;
           usageFromUpstream = true;
+        }
+        // Extract provider cost from usage chunk (OpenRouter: total_cost/cost)
+        if (json && typeof json === "object") {
+          const obj = json as Record<string, unknown>;
+          const usage = obj.usage as Record<string, unknown> | undefined;
+          if (usage) {
+            if (typeof usage.total_cost === "number" && usage.total_cost > 0) {
+              streamProviderCost = usage.total_cost;
+            } else if (typeof usage.cost === "number" && usage.cost > 0) {
+              streamProviderCost = usage.cost;
+            }
+          }
+          if (streamProviderCost === null && typeof obj.total_cost === "number") {
+            streamProviderCost = obj.total_cost as number;
+          }
         }
       }
 
@@ -623,6 +850,7 @@ export async function proxyStreamWithFallback(
               tokensIn,
               tokensOut,
               requestDetail,
+              providerCost: streamProviderCost,
               responseDetail: JSON.stringify({
                 stream: true,
                 tokensIn,

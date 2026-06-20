@@ -161,3 +161,29 @@
     stroke-dashoffset: -18;
   }
 }
+
+/* ═══ ReactFlow Controls - Light/Dark mode ready ═══ */
+.react-flow__controls {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  background: hsl(var(--background) / 0.95) !important;
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  border-color: hsl(var(--border)) !important;
+  background: hsl(var(--background)) !important;
+  color: hsl(var(--foreground)) !important;
+  transition: background 150ms, color 150ms;
+}
+
+.react-flow__controls-button:hover {
+  background: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor !important;
+}

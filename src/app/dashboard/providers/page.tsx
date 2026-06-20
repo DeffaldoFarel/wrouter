@@ -783,27 +783,21 @@ export default function ProvidersPage() {
               {checkingAll ? "Checking..." : "Check All"}
             </Button>
           )}
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger
-              render={
-                <Button
-                  onClick={() => {
-                    resetForm();
-                    setDialogOpen(true);
-                  }}
-                />
-              }
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Add Custom Provider
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Add Custom Provider</DialogTitle>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Connect any OpenAI-compatible endpoint
-                </p>
-              </DialogHeader>
+        </div>
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {format === "anthropic" ? "Add Anthropic Compatible" : "Add OpenAI Compatible"}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              {format === "anthropic"
+                ? "Connect an Anthropic-compatible endpoint (/v1/messages)"
+                : "Connect an OpenAI-compatible endpoint (/v1/chat/completions)"}
+            </p>
+          </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Name</Label>
@@ -892,8 +886,6 @@ export default function ProvidersPage() {
               </form>
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
 
       {/* ═══ Stats Overview ═══ */}
       {providers.length > 0 && (
@@ -951,6 +943,80 @@ export default function ProvidersPage() {
           )}
         </div>
       )}
+
+      {/* ═══ Custom Providers ═══ */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Custom Providers</h3>
+            {customProviders.length > 0 && (
+              <Badge variant="secondary" className="text-[10px]">
+                {customProviders.length}
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                resetForm();
+                setFormat("anthropic");
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add Anthropic Compatible
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                resetForm();
+                setFormat("openai");
+                setDialogOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add OpenAI Compatible
+            </Button>
+          </div>
+        </div>
+
+        {customProviders.length === 0 ? (
+          <Card className="border-dashed border-2">
+            <CardContent className="py-8 text-center space-y-2">
+              <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                <Plus className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">No custom providers yet</p>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                  Add any OpenAI-compatible endpoint like Groq, Together AI, or your own
+                  local LLM server.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : filteredCustom.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-6 border rounded-md border-dashed">
+            No providers match &quot;{searchQuery}&quot;
+          </p>
+        ) : (
+          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredCustom.map((provider) => (
+              <ProviderCard
+                key={provider.id}
+                provider={provider}
+                healthMap={healthMap}
+                onToggle={toggleProvider}
+                onCheckHealth={checkHealth}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* ═══ OAuth Providers ═══ */}
       <div className="space-y-3">
@@ -1118,68 +1184,6 @@ export default function ProvidersPage() {
                 />
               );
             })}
-          </div>
-        )}
-      </div>
-
-      {/* ═══ Custom Providers ═══ */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Zap className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold">Custom Providers</h3>
-            {customProviders.length > 0 && (
-              <Badge variant="secondary" className="text-[10px]">
-                {customProviders.length}
-              </Badge>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Direct OpenAI-compatible endpoints
-          </p>
-        </div>
-
-        {customProviders.length === 0 ? (
-          <Card className="border-dashed border-2">
-            <CardContent className="py-8 text-center space-y-3">
-              <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center">
-                <Plus className="h-5 w-5 text-muted-foreground" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-sm font-medium">No custom providers yet</p>
-                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                  Add any OpenAI-compatible endpoint like Groq, Together AI, or your own
-                  local LLM server.
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  resetForm();
-                  setDialogOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                Add Custom Provider
-              </Button>
-            </CardContent>
-          </Card>
-        ) : filteredCustom.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6 border rounded-md border-dashed">
-            No providers match &quot;{searchQuery}&quot;
-          </p>
-        ) : (
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredCustom.map((provider) => (
-              <ProviderCard
-                key={provider.id}
-                provider={provider}
-                healthMap={healthMap}
-                onToggle={toggleProvider}
-                onCheckHealth={checkHealth}
-              />
-            ))}
           </div>
         )}
       </div>

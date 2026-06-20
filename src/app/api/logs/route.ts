@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
         status: requestLogs.status,
         isStreaming: requestLogs.isStreaming,
         error: requestLogs.error,
+        costUsd: requestLogs.costUsd,
         requestDetail: requestLogs.requestDetail,
         responseDetail: requestLogs.responseDetail,
       })
@@ -71,6 +72,7 @@ export async function GET(req: NextRequest) {
       status: requestLogs.status,
       isStreaming: requestLogs.isStreaming,
       error: requestLogs.error,
+      costUsd: requestLogs.costUsd,
     })
     .from(requestLogs)
     .leftJoin(apiKeys, eq(requestLogs.apiKeyId, apiKeys.id))

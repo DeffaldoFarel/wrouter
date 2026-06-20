@@ -383,10 +383,15 @@ export function logRequest(params: {
   error?: string;
   requestDetail?: string | null;
   responseDetail?: string | null;
+  providerCost?: number | null;
 }) {
-  // Calculate cost if we have token counts
+  // Use provider-reported cost if available, otherwise estimate
   let costUsd: string | null = null;
-  if (params.tokensIn && params.tokensOut && params.model) {
+  if (params.providerCost != null && params.providerCost > 0) {
+    // Provider gave us actual cost — use it (more accurate)
+    costUsd = params.providerCost.toFixed(6);
+  } else if (params.tokensIn && params.tokensOut && params.model) {
+    // Fallback: estimate from internal pricing table
     const cost = calculateSimpleCost(params.model, params.tokensIn, params.tokensOut);
     if (cost !== null) {
       costUsd = cost.toFixed(6);

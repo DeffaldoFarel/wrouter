@@ -72,6 +72,7 @@ interface LogEntry {
   status: string;
   isStreaming: boolean;
   error: string | null;
+  costUsd?: string | null;
   requestDetail?: string | null;
   responseDetail?: string | null;
 }
@@ -803,6 +804,18 @@ function LogDetailSheet({
                   {(log.tokensOut ?? 0).toLocaleString()}
                 </p>
               </div>
+              <div className="space-y-0.5">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
+                  Estimated Cost
+                </p>
+                <p className="text-sm tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
+                  {log.costUsd
+                    ? parseFloat(log.costUsd) < 0.0001
+                      ? "< $0.0001"
+                      : `$${parseFloat(log.costUsd).toFixed(4)}`
+                    : "—"}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -1008,7 +1021,7 @@ export default function UsagePage() {
     return map;
   }, [usage?.canvasProviders, usage?.perProviderBreakdown]);
 
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = 20;
 
   const fetchAll = useCallback(async (f: string) => {
     try {
@@ -1639,6 +1652,9 @@ export default function UsagePage() {
                         <TableHead className="text-xs font-semibold uppercase tracking-wide text-right">
                           Tokens
                         </TableHead>
+                        <TableHead className="text-xs font-semibold uppercase tracking-wide text-right">
+                          Cost
+                        </TableHead>
                         <TableHead className="pr-4 text-xs font-semibold uppercase tracking-wide w-8" />
                       </TableRow>
                     </TableHeader>
@@ -1740,6 +1756,19 @@ export default function UsagePage() {
                                   <span className="text-muted-foreground">
                                     {(log.tokensOut ?? 0).toLocaleString()}
                                   </span>
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs tabular-nums py-2.5 text-right">
+                              {log.costUsd ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                  {parseFloat(log.costUsd) < 0.0001
+                                    ? "< $0.0001"
+                                    : parseFloat(log.costUsd) < 0.01
+                                    ? `$${parseFloat(log.costUsd).toFixed(4)}`
+                                    : `$${parseFloat(log.costUsd).toFixed(4)}`}
                                 </span>
                               ) : (
                                 <span className="text-muted-foreground">—</span>

@@ -70,5 +70,23 @@ export const KNOWN_API_KEY_PROVIDERS: KnownApiKeyProvider[] = [
     brandColor: "#10a37f",
     iconLabel: "OA",
   },
+  {
+    prefix: "mimo",
+    name: "MiMo",
+    description: "Xiaomi MiMo API - OpenAI compatible",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    docsUrl: "https://mimo.mi.com/docs/en-US/",
+    keyPlaceholder: "sk-xxxxx",
+    iconLabel: "MiMo",
+  },
+  {
+    prefix: "qwen",
+    name: "Qwen",
+    description: "Alibaba Qwen Cloud - OpenAI compatible",
+    baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    docsUrl: "https://docs.qwencloud.com/",
+    keyPlaceholder: "sk-xxxxx",
+    iconLabel: "Qwen",
+  },
   // Add more API Key Providers here as needed
 ];
