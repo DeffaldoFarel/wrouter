@@ -26,7 +26,7 @@ export async function GET(
   return NextResponse.json({
     ...provider,
     models: JSON.parse(provider.models),
-    apiKey: maskApiKey(safeDecryptApiKey(provider.apiKey)),
+    apiKey: provider.apiKey ? maskApiKey(safeDecryptApiKey(provider.apiKey)) : null,
   });
 }
 
@@ -34,7 +34,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -50,7 +50,7 @@ export async function PUT(
     );
   }
 
-  const { name, prefix, baseUrl, apiKey, models, enabled, type, format } = body as {
+  const { name, prefix, baseUrl, apiKey, models, enabled, type, format, connectionStrategy } = body as {
     name?: string;
     prefix?: string;
     baseUrl?: string;
@@ -59,6 +59,7 @@ export async function PUT(
     enabled?: boolean;
     type?: string;
     format?: string;
+    connectionStrategy?: string;
   };
 
   // Validate format if provided
@@ -109,6 +110,7 @@ export async function PUT(
     enabled: enabled !== undefined ? enabled : existing.enabled,
     type: type ?? existing.type,
     format: format ?? (existing as { format?: string }).format ?? "openai",
+    connectionStrategy: connectionStrategy ?? (existing as { connectionStrategy?: string }).connectionStrategy ?? "priority",
     updatedAt: new Date().toISOString(),
   };
 
@@ -119,7 +121,7 @@ export async function PUT(
     id,
     ...updated,
     models: JSON.parse(updated.models),
-    apiKey: maskApiKey(safeDecryptApiKey(updated.apiKey)),
+    apiKey: updated.apiKey ? maskApiKey(safeDecryptApiKey(updated.apiKey)) : null,
   });
 }
 
@@ -127,7 +129,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!checkAuth(req)) {
+  if (!checkDashboardAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

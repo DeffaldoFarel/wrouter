@@ -57,6 +57,13 @@ export async function POST(
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout for completions
 
+      if (!provider.apiKey) {
+        return NextResponse.json({
+          success: false,
+          error: "No API key configured for this provider",
+        });
+      }
+
       const res = await fetch(completionsUrl, {
         method: "POST",
         headers: {

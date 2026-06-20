@@ -1,6 +1,6 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+/* @import "tw-animate-css"; — not installed, causes Turbopack panic on Windows */
+/* @import "shadcn/tailwind.css"; — not found, causes Turbopack panic on Windows */
 
 @custom-variant dark (&:is(.dark *));
 

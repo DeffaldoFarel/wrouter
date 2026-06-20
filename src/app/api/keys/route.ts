@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, generateApiKey } from "@/lib/db";
 import { apiKeys } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkDashboardAuth } from "@/lib/auth/session";
 

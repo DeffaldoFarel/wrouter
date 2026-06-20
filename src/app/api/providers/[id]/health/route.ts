@@ -41,6 +41,14 @@ export async function GET(
     }
 
     try {
+      if (!provider.apiKey) {
+        return NextResponse.json({
+          online: false,
+          error: "No API key configured",
+          latencyMs: 0,
+        });
+      }
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
 

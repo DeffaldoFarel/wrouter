@@ -19,7 +19,8 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-http://localhost:20128}
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      # JWT_SECRET auto-generated on first boot (see src/lib/bootstrap.ts)
+      # Override with: JWT_SECRET=your-secret docker compose up
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:20128/api/health"]

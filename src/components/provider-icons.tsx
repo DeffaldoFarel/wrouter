@@ -1,9 +1,31 @@
 /**
- * Provider brand icons (sourced from @lobehub/icons)
- * Each icon uses currentColor so it inherits text color from parent.
+ * Provider brand icons using @lobehub/icons.
+ * Each icon exports a Color variant for rich brand appearance.
  */
+"use client";
 
 import type { SVGProps } from "react";
+
+// ─── @lobehub/icons imports (Color variants) ───
+import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
+import Codex from "@lobehub/icons/es/Codex";
+import GithubCopilot from "@lobehub/icons/es/GithubCopilot";
+import CursorIcon from "@lobehub/icons/es/Cursor";
+import KiroIcon from "@lobehub/icons/es/Kiro";
+import GeminiCLI from "@lobehub/icons/es/GeminiCLI";
+import OpenRouterIcons from "@lobehub/icons/es/OpenRouter";
+import DeepSeekIcons from "@lobehub/icons/es/DeepSeek";
+import OpenAI from "@lobehub/icons/es/OpenAI";
+import Anthropic from "@lobehub/icons/es/Anthropic";
+import Google from "@lobehub/icons/es/Google";
+import Groq from "@lobehub/icons/es/Groq";
+import Mistral from "@lobehub/icons/es/Mistral";
+import Together from "@lobehub/icons/es/Together";
+import Fireworks from "@lobehub/icons/es/Fireworks";
+import Aws from "@lobehub/icons/es/Aws";
+import AiStudio from "@lobehub/icons/es/AiStudio";
+
+// ─── Legacy re-exports for backward compat ───
 
 export function OpenRouterIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -22,11 +44,7 @@ export function OpenRouterIcon(props: SVGProps<SVGSVGElement>) {
 
 export function DeepSeekIcon(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-      {...props}
-    >
+    <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
       <title>DeepSeek</title>
       <path
         fill="#4D6BFE"
@@ -52,20 +70,73 @@ export function AIStudioIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// ─── Icon Registry (using @lobehub/icons) ───
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyIcon = any;
+
+interface IconEntry {
+  icon: AnyIcon;
+  label: string;
+}
+
+const ICON_REGISTRY: Record<string, IconEntry> = {
+  // OAuth Providers
+  claude: { icon: ClaudeCode, label: "Claude Code" },
+  codex: { icon: Codex, label: "OpenAI Codex" },
+  github: { icon: GithubCopilot, label: "GitHub Copilot" },
+  cursor: { icon: CursorIcon, label: "Cursor" },
+  kiro: { icon: KiroIcon, label: "Kiro" },
+  "gemini-cli": { icon: GeminiCLI, label: "Gemini CLI" },
+  // API Key Providers
+  openrouter: { icon: OpenRouterIcons, label: "OpenRouter" },
+  deepseek: { icon: DeepSeekIcons, label: "DeepSeek" },
+  openai: { icon: OpenAI, label: "OpenAI" },
+  anthropic: { icon: Anthropic, label: "Anthropic" },
+  google: { icon: Google, label: "Google" },
+  gemini: { icon: AiStudio, label: "Google AI Studio" },
+  aistudio: { icon: AiStudio, label: "AI Studio" },
+  groq: { icon: Groq, label: "Groq" },
+  mistral: { icon: Mistral, label: "Mistral" },
+  together: { icon: Together, label: "Together" },
+  fireworks: { icon: Fireworks, label: "Fireworks" },
+  aws: { icon: Aws, label: "AWS" },
+};
+
+/** Prefixes that have a brand icon defined. */
+export const KNOWN_ICON_PREFIXES: ReadonlySet<string> = new Set(
+  Object.keys(ICON_REGISTRY)
+);
+
+/**
+ * Renders the brand icon for a given prefix using @lobehub/icons Mono variant.
+ * Mono uses currentColor so it inherits text color from parent.
+ * Returns null if no brand icon is available.
+ */
+export function ProviderIcon({
+  prefix,
+  className,
+  size,
+}: {
+  prefix?: string;
+  className?: string;
+  size?: number | string;
+}) {
+  if (!prefix) return null;
+  const entry = ICON_REGISTRY[prefix];
+  if (!entry) return null;
+
+  const IconComponent = entry.icon;
+  // Default export IS the Mono variant
+  return <IconComponent size={size || "1em"} className={className} />;
+}
+
 /**
  * Resolve an icon component by provider prefix.
- * Returns null if no brand icon is available (caller should fallback to generic icon).
+ * Returns the Mono component or null if no brand icon is available.
  */
-export function getProviderIcon(prefix: string): React.ComponentType<SVGProps<SVGSVGElement>> | null {
-  switch (prefix) {
-    case "openrouter":
-      return OpenRouterIcon;
-    case "deepseek":
-      return DeepSeekIcon;
-    case "gemini":
-    case "aistudio":
-      return AIStudioIcon;
-    default:
-      return null;
-  }
+export function getProviderIcon(prefix: string): React.ComponentType<{ size?: number | string; className?: string }> | null {
+  const entry = ICON_REGISTRY[prefix];
+  if (!entry) return null;
+  return entry.icon;
 }

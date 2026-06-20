@@ -12,12 +12,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyApiKey } from "@/lib/auth/session";
-import { resolveModel, getFallbackChain, logRequest } from "@/lib/router/engine";
+import { resolveModel, getFallbackChain } from "@/lib/router/engine";
 import { proxyWithFallback, proxyStreamWithFallback } from "@/lib/router/proxy";
 import { compressToolResults } from "@/lib/token-saver/rtk";
 import { injectCavemanPrompt } from "@/lib/token-saver/caveman";
 import { responsesToChat, chatToResponses, translateChatStreamToResponses } from "@/lib/router/translator/responses";
 import { db } from "@/lib/db";
+import type { Message } from "@/lib/validation";
 import { settings, combos, providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { chatLimiter, rateLimitResponse } from "@/lib/rate-limit";
@@ -137,14 +138,14 @@ export async function POST(req: NextRequest) {
     const cavemanEnabled = db.select().from(settings).where(eq(settings.key, "caveman_enabled")).get();
 
     // Apply token savers if enabled
-    let processedBody = { ...chatBody };
+    const processedBody = { ...chatBody };
 
     if (rtkEnabled?.value === "true" && processedBody.messages) {
-      processedBody.messages = compressToolResults(processedBody.messages);
+      processedBody.messages = compressToolResults(processedBody.messages as Message[]);
     }
 
     if (cavemanEnabled?.value === "true" && processedBody.messages) {
-      processedBody.messages = injectCavemanPrompt(processedBody.messages);
+      processedBody.messages = injectCavemanPrompt(processedBody.messages as Message[]);
     }
 
     // Build request detail for DB storage

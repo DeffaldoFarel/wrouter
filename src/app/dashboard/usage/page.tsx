@@ -38,6 +38,7 @@ import {
   ArrowUpFromLine,
   Timer,
   Zap,
+  DollarSign,
   Wifi,
   WifiOff,
   Download,
@@ -244,7 +245,7 @@ function MiniBrandIcon({ prefix }: { prefix?: string }) {
   if (Icon) {
     return (
       <div className="flex items-center justify-center rounded shrink-0 bg-muted/50 border h-5 w-5">
-        <Icon className="h-3.5 w-3.5" />
+        <Icon size={14} />
       </div>
     );
   }
@@ -603,8 +604,38 @@ function LogDetailSheet({
   providerName: string;
   onClose: () => void;
 }) {
+  const [detail, setDetail] = useState<LogEntry | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Fetch full detail (requestDetail + responseDetail) on-demand
+  useEffect(() => {
+    if (!log) {
+      setDetail(null);
+      return;
+    }
+    // If log already has detail (e.g., from SSE), use it directly
+    if (log.requestDetail || log.responseDetail) {
+      setDetail(log);
+      return;
+    }
+    // Otherwise fetch from server
+    let cancelled = false;
+    setLoadingDetail(true);
+    fetch(`/api/logs?id=${log.id}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!cancelled && data?.log) {
+          setDetail({ ...log, ...data.log });
+        }
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingDetail(false); });
+    return () => { cancelled = true; };
+  }, [log]);
+
   if (!log) return null;
-  const totalTokens = (log.tokensIn ?? 0) + (log.tokensOut ?? 0);
+  const displayLog = detail || log;
+  const totalTokens = (displayLog.tokensIn ?? 0) + (displayLog.tokensOut ?? 0);
   return (
     <Sheet open={!!log} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
@@ -623,9 +654,9 @@ function LogDetailSheet({
         <div className="space-y-5 px-4 py-4">
           {/* Status banner */}
           <div className="flex items-center justify-between p-3 rounded-md border bg-muted/30">
-            <StatusPill status={log.status} />
+            <StatusPill status={displayLog.status} />
             <span className="text-xs text-muted-foreground">
-              {new Date(log.timestamp).toLocaleString()}
+              {new Date(displayLog.timestamp).toLocaleString()}
             </span>
           </div>
 
@@ -641,12 +672,12 @@ function LogDetailSheet({
                 </p>
                 <div className="flex items-center gap-1.5">
                   <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono break-all">
-                    {log.id}
+                    {displayLog.id}
                   </code>
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(log.id);
+                      navigator.clipboard.writeText(displayLog.id);
                       toast.success("Copied");
                     }}
                     className="text-muted-foreground hover:text-foreground shrink-0"
@@ -659,20 +690,20 @@ function LogDetailSheet({
                 <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
                   API Key
                 </p>
-                {log.apiKeyName ? (
+                {displayLog.apiKeyName ? (
                   <div className="flex items-center gap-1.5">
                     <Badge variant="outline" className="text-xs">
-                      {log.apiKeyName}
+                      {displayLog.apiKeyName}
                     </Badge>
-                    {log.apiKeyId && (
+                    {displayLog.apiKeyId && (
                       <code className="text-[10px] text-muted-foreground font-mono">
-                        {log.apiKeyId.slice(0, 8)}…
+                        {displayLog.apiKeyId.slice(0, 8)}…
                       </code>
                     )}
                   </div>
                 ) : (
                   <span className="text-xs text-muted-foreground">
-                    {log.apiKeyId ? `(deleted: ${log.apiKeyId.slice(0, 8)}…)` : "—"}
+                    {displayLog.apiKeyId ? `(deleted: ${displayLog.apiKeyId.slice(0, 8)}…)` : "—"}
                   </span>
                 )}
               </div>
@@ -681,7 +712,7 @@ function LogDetailSheet({
                   Provider
                 </p>
                 <div className="flex items-center gap-1.5">
-                  <MiniBrandIcon prefix={log.providerPrefix ?? undefined} />
+                  <MiniBrandIcon prefix={displayLog.providerPrefix ?? undefined} />
                   <span className="text-sm">{providerName}</span>
                 </div>
               </div>
@@ -691,13 +722,13 @@ function LogDetailSheet({
                 </p>
                 <div className="flex items-center gap-1.5">
                   <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono break-all">
-                    {log.model || "—"}
+                    {displayLog.model || "—"}
                   </code>
-                  {log.model && (
+                  {displayLog.model && (
                     <button
                       type="button"
                       onClick={() => {
-                        navigator.clipboard.writeText(log.model!);
+                        navigator.clipboard.writeText(displayLog.model!);
                         toast.success("Copied");
                       }}
                       className="text-muted-foreground hover:text-foreground shrink-0"
@@ -712,7 +743,7 @@ function LogDetailSheet({
                   Response Type
                 </p>
                 <div className="flex items-center gap-1.5">
-                  {log.isStreaming ? (
+                  {displayLog.isStreaming ? (
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-600 dark:text-violet-400">
                       <Zap className="h-3.5 w-3.5" />
                       Streaming (SSE)
@@ -776,20 +807,20 @@ function LogDetailSheet({
           </div>
 
           {/* Error details */}
-          {log.error && (
+          {displayLog.error && (
             <div className="space-y-2 pt-3 border-t">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
                 Error Details
               </p>
               <div className="rounded-md border border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20 p-3">
                 <p className="text-sm text-red-700 dark:text-red-400 font-mono break-all whitespace-pre-wrap">
-                  {log.error}
+                  {displayLog.error}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => {
-                  navigator.clipboard.writeText(log.error!);
+                  navigator.clipboard.writeText(displayLog.error!);
                   toast.success("Error copied");
                 }}
                 className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
@@ -801,7 +832,15 @@ function LogDetailSheet({
           )}
 
           {/* Request Details JSON */}
-          {log.requestDetail && (
+          {/* Loading indicator for detail fetch */}
+          {loadingDetail && !displayLog.requestDetail && !displayLog.responseDetail && (
+            <div className="flex items-center justify-center py-6 border-t">
+              <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
+              <span className="text-sm text-muted-foreground">Loading request details...</span>
+            </div>
+          )}
+
+          {displayLog.requestDetail && (
             <div className="space-y-2 pt-3 border-t">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
                 Request Details
@@ -810,9 +849,9 @@ function LogDetailSheet({
                 <pre className="text-xs font-mono whitespace-pre-wrap break-all text-muted-foreground max-h-[600px] overflow-y-auto leading-relaxed">
                   {(() => {
                     try {
-                      return JSON.stringify(JSON.parse(log.requestDetail!), null, 2);
+                      return JSON.stringify(JSON.parse(displayLog.requestDetail!), null, 2);
                     } catch {
-                      return log.requestDetail!;
+                      return displayLog.requestDetail!;
                     }
                   })()}
                 </pre>
@@ -822,10 +861,10 @@ function LogDetailSheet({
                   type="button"
                   onClick={() => {
                     try {
-                      const parsed = JSON.parse(log.requestDetail!);
+                      const parsed = JSON.parse(displayLog.requestDetail!);
                       navigator.clipboard.writeText(JSON.stringify(parsed, null, 2));
                     } catch {
-                      navigator.clipboard.writeText(log.requestDetail!);
+                      navigator.clipboard.writeText(displayLog.requestDetail!);
                     }
                     toast.success("Full JSON copied");
                   }}
@@ -838,7 +877,7 @@ function LogDetailSheet({
                   type="button"
                   onClick={() => {
                     try {
-                      const parsed = JSON.parse(log.requestDetail!);
+                      const parsed = JSON.parse(displayLog.requestDetail!);
                       navigator.clipboard.writeText(JSON.stringify(parsed.body ?? parsed, null, 2));
                       toast.success("Request body copied");
                     } catch {
@@ -855,7 +894,7 @@ function LogDetailSheet({
           )}
 
           {/* Response Details JSON */}
-          {log.responseDetail && (
+          {displayLog.responseDetail && (
             <div className="space-y-2 pt-3 border-t">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">
                 Response Details
@@ -864,9 +903,9 @@ function LogDetailSheet({
                 <pre className="text-xs font-mono whitespace-pre-wrap break-all text-muted-foreground max-h-[600px] overflow-y-auto leading-relaxed">
                   {(() => {
                     try {
-                      return JSON.stringify(JSON.parse(log.responseDetail!), null, 2);
+                      return JSON.stringify(JSON.parse(displayLog.responseDetail!), null, 2);
                     } catch {
-                      return log.responseDetail!;
+                      return displayLog.responseDetail!;
                     }
                   })()}
                 </pre>
@@ -895,10 +934,10 @@ function LogDetailSheet({
                 type="button"
                 onClick={() => {
                   try {
-                    const parsed = JSON.parse(log.responseDetail!);
+                    const parsed = JSON.parse(displayLog.responseDetail!);
                     navigator.clipboard.writeText(JSON.stringify(parsed, null, 2));
                   } catch {
-                    navigator.clipboard.writeText(log.responseDetail!);
+                    navigator.clipboard.writeText(displayLog.responseDetail!);
                   }
                   toast.success("Response JSON copied");
                 }}
@@ -923,6 +962,10 @@ export default function UsagePage() {
   const [filter, setFilter] = useState("24h");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [usage, setUsage] = useState<UsageData | null>(null);
+  const [costData, setCostData] = useState<{
+    totals: { today: number; week: number; month: number };
+    byModel: { model: string; cost: number; requests: number }[];
+  } | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logsTotal, setLogsTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -969,10 +1012,11 @@ export default function UsagePage() {
 
   const fetchAll = useCallback(async (f: string) => {
     try {
-      const [ur, lr, pr] = await Promise.all([
+      const [ur, lr, pr, cr] = await Promise.all([
         fetch(`/api/usage?filter=${f}`),
         fetch(`/api/logs?limit=${PAGE_SIZE}`),
         fetch("/api/providers"),
+        fetch("/api/stats/costs"),
       ]);
       if (ur.ok) setUsage(await ur.json());
       if (lr.ok) {
@@ -988,6 +1032,7 @@ export default function UsagePage() {
         }
         setProvidersById(byId);
       }
+      if (cr.ok) setCostData(await cr.json());
     } catch {
       /* silent */
     } finally {
@@ -1267,7 +1312,7 @@ export default function UsagePage() {
       </div>
 
       {/* ═══ Stat Cards ═══ */}
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard
           label="Total Requests"
           value={(s?.totalRequests ?? 0).toLocaleString()}
@@ -1299,6 +1344,12 @@ export default function UsagePage() {
           sublabel={
             s?.avgLatency && s.avgLatency > 3000 ? "above 3s threshold" : undefined
           }
+        />
+        <StatCard
+          label="Est. Cost"
+          value={costData ? `$${costData.totals.today.toFixed(4)}` : "—"}
+          icon={DollarSign}
+          sublabel={costData ? `$${costData.totals.month.toFixed(2)} this month` : undefined}
         />
       </div>
 

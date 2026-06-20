@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyApiKey } from "@/lib/auth/session";
-import { resolveModel, getFallbackChain, logRequest } from "@/lib/router/engine";
+import { resolveModel, getFallbackChain } from "@/lib/router/engine";
 import { proxyWithFallback, proxyStreamWithFallback } from "@/lib/router/proxy";
 import { compressToolResults } from "@/lib/token-saver/rtk";
 import { injectCavemanPrompt } from "@/lib/token-saver/caveman";
@@ -9,6 +9,7 @@ import { settings, combos, providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { chatLimiter, rateLimitResponse } from "@/lib/rate-limit";
 import { validateChatRequest } from "@/lib/validation";
+import type { Message } from "@/lib/validation";
 import logger from "@/lib/logger";
 import { maybeCleanupLogs } from "@/lib/log-retention";
 import { captureException } from "@/lib/sentry";
@@ -73,11 +74,7 @@ export async function POST(req: NextRequest) {
     model = body.model;
     const stream = body.stream;
 
-    const requestStartTime = Date.now();
-
     logger.info({
-      model,
-      apiKeyId,
       stream: !!stream,
       messageCount: body.messages?.length,
     }, "Chat completion request");
@@ -126,18 +123,18 @@ export async function POST(req: NextRequest) {
     const cavemanEnabled = db.select().from(settings).where(eq(settings.key, "caveman_enabled")).get();
 
     // Apply token savers if enabled
-    let processedBody = { ...body };
+    const processedBody = { ...body };
 
     if (rtkEnabled?.value === "true" && processedBody.messages) {
-      processedBody.messages = compressToolResults(processedBody.messages);
+      processedBody.messages = compressToolResults(processedBody.messages as Message[]);
     }
 
     if (cavemanEnabled?.value === "true" && processedBody.messages) {
-      processedBody.messages = injectCavemanPrompt(processedBody.messages);
+      processedBody.messages = injectCavemanPrompt(processedBody.messages as Message[]);
     }
 
     // ─── Debug logging ───
-    const systemMsg = processedBody.messages?.find((m: any) => m.role === "system");
+    const systemMsg = processedBody.messages?.find((m: Record<string, unknown>) => m.role === "system");
     logger.info({
       event: "proxy_debug",
       model_requested: model,

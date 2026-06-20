@@ -3,7 +3,9 @@ import { providers, combos, requestLogs, apiKeys } from "../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { safeDecryptApiKey } from "../crypto";
+import { calculateSimpleCost } from "../cost-calculator";
 import logger from "@/lib/logger";
+import { pickConnection, pickFallback, recordError } from "../key-picker";
 
 // In-memory counter of active (in-flight) proxy jobs.
 // LIMITATION: This is per-process only. If the app runs in cluster/multi-process mode
@@ -91,6 +93,8 @@ export interface RoutingResult {
   // Upstream API dialect: "openai" (default) | "anthropic" | "gemini"
   // Determines how proxy.ts translates the request/response.
   format: string;
+  // Multi-key support: which connection was used (null if fallback to provider-level key)
+  connectionId: string | null;
 }
 
 /**
@@ -102,6 +106,52 @@ export interface RoutingResult {
  * - "prefix/model-name" → route directly to provider with that prefix
  * - "model-name" → find first provider that has this model
  */
+
+/**
+ * Try to resolve an API key from multi-key connections for a provider.
+ * Falls back to the provider-level apiKey if no connections exist.
+ */
+function resolveProviderKey(
+  provider: typeof providers.$inferSelect,
+): { apiKey: string; connectionId: string | null } | null {
+  // Try multi-key connections first
+  const strategy = (provider as { connectionStrategy?: string }).connectionStrategy ?? "priority";
+  const picked = pickConnection(provider.id, strategy);
+
+  if (picked.key) {
+    return { apiKey: picked.key.apiKey, connectionId: picked.connectionId };
+  }
+
+  // Fallback to provider-level single key (backward compatibility)
+  if (provider.apiKey) {
+    return { apiKey: safeDecryptApiKey(provider.apiKey), connectionId: null };
+  }
+
+  return null;
+}
+
+/**
+ * Build a RoutingResult from a provider row.
+ * Returns null if no API key is available.
+ */
+function buildRoutingResult(
+  provider: typeof providers.$inferSelect,
+  modelName: string,
+): RoutingResult | null {
+  const keyInfo = resolveProviderKey(provider);
+  if (!keyInfo) return null;
+
+  return {
+    providerId: provider.id,
+    providerName: provider.name,
+    baseUrl: provider.baseUrl,
+    apiKey: keyInfo.apiKey,
+    format: (provider as { format?: string }).format ?? "openai",
+    model: modelName,
+    connectionId: keyInfo.connectionId,
+  };
+}
+
 export function resolveModel(requestedModel: string): RoutingResult | null {
   logger.debug({ model: requestedModel }, "Resolving model");
 
@@ -123,14 +173,7 @@ export function resolveModel(requestedModel: string): RoutingResult | null {
       if (!registeredModels.includes(modelName)) {
         return null; // Model not registered — reject before hitting upstream
       }
-      return {
-        providerId: providerByPrefix.id,
-        providerName: providerByPrefix.name,
-        baseUrl: providerByPrefix.baseUrl,
-        apiKey: safeDecryptApiKey(providerByPrefix.apiKey),
-        format: (providerByPrefix as { format?: string }).format ?? "openai",
-        model: modelName,
-      };
+      return buildRoutingResult(providerByPrefix, modelName);
     }
 
     // Then check if it's a combo slug
@@ -181,14 +224,7 @@ function resolveComboModel(slug: string, modelName: string): RoutingResult | nul
     const provider = providerMap.get(entry.providerId);
 
     if (provider && provider.enabled) {
-      return {
-        providerId: provider.id,
-        providerName: provider.name,
-        baseUrl: provider.baseUrl,
-        apiKey: safeDecryptApiKey(provider.apiKey),
-        format: (provider as { format?: string }).format ?? "openai",
-        model: entry.model,
-      };
+      return buildRoutingResult(provider, entry.model);
     }
   }
 
@@ -215,14 +251,7 @@ function resolveComboFirstModel(combo: typeof combos.$inferSelect): RoutingResul
     const provider = providerMap.get(entry.providerId);
 
     if (provider && provider.enabled) {
-      return {
-        providerId: provider.id,
-        providerName: provider.name,
-        baseUrl: provider.baseUrl,
-        apiKey: safeDecryptApiKey(provider.apiKey),
-        format: (provider as { format?: string }).format ?? "openai",
-        model: entry.model,
-      };
+      return buildRoutingResult(provider, entry.model);
     }
   }
 
@@ -240,14 +269,7 @@ function resolveDirectModel(modelName: string): RoutingResult | null {
 
     const providerModels: string[] = safeJsonParse<string[]>(provider.models, []);
     if (providerModels.includes(modelName)) {
-      return {
-        providerId: provider.id,
-        providerName: provider.name,
-        baseUrl: provider.baseUrl,
-        apiKey: safeDecryptApiKey(provider.apiKey),
-        format: (provider as { format?: string }).format ?? "openai",
-        model: modelName,
-      };
+      return buildRoutingResult(provider, modelName);
     }
   }
 
@@ -275,14 +297,8 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
       // Strict model validation — same as resolveModel()
       const registeredModels: string[] = safeJsonParse<string[]>(providerByPrefix.models, []);
       if (registeredModels.includes(modelName)) {
-        results.push({
-          providerId: providerByPrefix.id,
-          providerName: providerByPrefix.name,
-          baseUrl: providerByPrefix.baseUrl,
-          apiKey: safeDecryptApiKey(providerByPrefix.apiKey),
-          format: (providerByPrefix as { format?: string }).format ?? "openai",
-          model: modelName,
-        });
+        const result = buildRoutingResult(providerByPrefix, modelName);
+        if (result) results.push(result);
       }
       return results; // return even if empty — prefix matched, don't fall through to combo
     }
@@ -310,14 +326,8 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
       const provider = providerMap.get(entry.providerId);
 
       if (provider && provider.enabled) {
-        results.push({
-          providerId: provider.id,
-          providerName: provider.name,
-          baseUrl: provider.baseUrl,
-          apiKey: safeDecryptApiKey(provider.apiKey),
-          format: (provider as { format?: string }).format ?? "openai",
-          model: entry.model,
-        });
+        const result = buildRoutingResult(provider, entry.model);
+        if (result) results.push(result);
       }
     }
   } else {
@@ -342,14 +352,8 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
         const provider = providerMap.get(entry.providerId);
 
         if (provider && provider.enabled) {
-          results.push({
-            providerId: provider.id,
-            providerName: provider.name,
-            baseUrl: provider.baseUrl,
-            apiKey: safeDecryptApiKey(provider.apiKey),
-            format: (provider as { format?: string }).format ?? "openai",
-            model: entry.model,
-          });
+          const result = buildRoutingResult(provider, entry.model);
+          if (result) results.push(result);
         }
       }
     } else {
@@ -370,6 +374,7 @@ export function logRequest(params: {
   providerId: string | null;
   comboId?: string | null;
   apiKeyId?: string | null;
+  connectionId?: string | null;
   tokensIn?: number;
   tokensOut?: number;
   latencyMs: number;
@@ -379,6 +384,15 @@ export function logRequest(params: {
   requestDetail?: string | null;
   responseDetail?: string | null;
 }) {
+  // Calculate cost if we have token counts
+  let costUsd: string | null = null;
+  if (params.tokensIn && params.tokensOut && params.model) {
+    const cost = calculateSimpleCost(params.model, params.tokensIn, params.tokensOut);
+    if (cost !== null) {
+      costUsd = cost.toFixed(6);
+    }
+  }
+
   const entry = {
     id: uuidv4(),
     timestamp: new Date().toISOString(),
@@ -391,6 +405,7 @@ export function logRequest(params: {
     latencyMs: params.latencyMs,
     status: params.status,
     isStreaming: params.isStreaming ?? false,
+    costUsd,
     error: params.error || null,
     requestDetail: params.requestDetail || null,
     responseDetail: params.responseDetail || null,
@@ -401,6 +416,7 @@ export function logRequest(params: {
   logger.debug({
     model: params.model,
     providerId: params.providerId,
+    connectionId: params.connectionId,
     status: params.status,
     latencyMs: params.latencyMs,
     tokensIn: params.tokensIn,
@@ -414,6 +430,6 @@ export function logRequest(params: {
     apiKeyName = keyRow?.name ?? null;
   }
 
-  // Push to SSE subscribers (include resolved apiKeyName for real-time display)
-  notifySSE({ type: "log", data: { ...entry, apiKeyName } });
+  // Push to SSE subscribers (include resolved apiKeyName and connectionId for real-time display)
+  notifySSE({ type: "log", data: { ...entry, apiKeyName, connectionId: params.connectionId || null } });
 }

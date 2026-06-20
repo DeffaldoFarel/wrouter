@@ -3,7 +3,52 @@ export interface ValidationResult {
   errors?: string[];
 }
 
-export function validateChatRequest(body: any): ValidationResult {
+export interface ContentPart {
+  type: string;
+  text?: string;
+  image_url?: {
+    url: string;
+    detail?: string;
+  };
+  [key: string]: unknown;
+}
+
+export interface Message {
+  role: string;
+  content: string | ContentPart[];
+  [key: string]: unknown;
+}
+
+export interface ChatRequest {
+  model: string;
+  messages: Message[];
+  temperature?: number;
+  max_tokens?: number;
+  stream?: boolean;
+  [key: string]: unknown;
+}
+
+export interface ProviderRequest {
+  name: string;
+  prefix: string;
+  baseUrl: string;
+  apiKey: string;
+  type?: 'custom' | 'apikey';
+  [key: string]: unknown;
+}
+
+export interface ProviderUpdateRequest {
+  name?: string;
+  prefix?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  type?: 'custom' | 'apikey';
+  enabled?: boolean;
+  models?: unknown[];
+  [key: string]: unknown;
+}
+
+export function validateChatRequest(body: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
 
   // Validate model
@@ -29,27 +74,31 @@ export function validateChatRequest(body: any): ValidationResult {
     }
 
     const validRoles = ["system", "user", "assistant", "tool"];
-    body.messages.forEach((msg: any, idx: number) => {
-      if (!msg.role) {
+    const messages = body.messages as Array<Record<string, unknown>>;
+    messages.forEach((msg, idx: number) => {
+      const role = msg.role as string | undefined;
+      if (!role) {
         errors.push(`messages[${idx}].role is required`);
-      } else if (!validRoles.includes(msg.role)) {
+      } else if (!validRoles.includes(role)) {
         errors.push(`messages[${idx}].role must be one of: ${validRoles.join(", ")}`);
       }
 
-      if (msg.content === undefined || msg.content === null) {
+      const content = msg.content;
+      if (content === undefined || content === null) {
         errors.push(`messages[${idx}].content is required`);
-      } else if (typeof msg.content === "string") {
-        if (msg.content.length > 100000) {
+      } else if (typeof content === "string") {
+        if (content.length > 100000) {
           errors.push(`messages[${idx}].content must be max 100000 characters`);
         }
-      } else if (Array.isArray(msg.content)) {
+      } else if (Array.isArray(content)) {
         // Multimodal content (OpenAI vision format)
-        if (msg.content.length === 0) {
+        if (content.length === 0) {
           errors.push(`messages[${idx}].content array must have at least 1 item`);
-        } else if (msg.content.length > 50) {
+        } else if (content.length > 50) {
           errors.push(`messages[${idx}].content array must have max 50 items`);
         } else {
-          msg.content.forEach((part: any, partIdx: number) => {
+          const parts = content as Array<Record<string, unknown>>;
+          parts.forEach((part, partIdx: number) => {
             if (!part || typeof part !== "object") {
               errors.push(`messages[${idx}].content[${partIdx}] must be an object`);
               return;
@@ -62,18 +111,19 @@ export function validateChatRequest(body: any): ValidationResult {
                 errors.push(`messages[${idx}].content[${partIdx}].text must be max 100000 characters`);
               }
             } else if (part.type === "image_url") {
-              if (!part.image_url || typeof part.image_url !== "object") {
+              const imageUrl = part.image_url as Record<string, unknown> | undefined;
+              if (!imageUrl || typeof imageUrl !== "object") {
                 errors.push(`messages[${idx}].content[${partIdx}].image_url must be an object`);
-              } else if (typeof part.image_url.url !== "string") {
+              } else if (typeof imageUrl.url !== "string") {
                 errors.push(`messages[${idx}].content[${partIdx}].image_url.url must be a string`);
-              } else if (part.image_url.url.length > 10_000_000) {
+              } else if (imageUrl.url.length > 10_000_000) {
                 // ~7.5MB base64 image — prevents abuse
                 errors.push(`messages[${idx}].content[${partIdx}].image_url.url is too large (max ~7.5MB base64)`);
               }
               // detail is optional: "low" | "high" | "auto"
-              if (part.image_url?.detail !== undefined) {
+              if (imageUrl?.detail !== undefined) {
                 const validDetails = ["low", "high", "auto"];
-                if (!validDetails.includes(part.image_url.detail)) {
+                if (!validDetails.includes(imageUrl.detail as string)) {
                   errors.push(`messages[${idx}].content[${partIdx}].image_url.detail must be one of: ${validDetails.join(", ")}`);
                 }
               }
@@ -125,7 +175,7 @@ export function validateChatRequest(body: any): ValidationResult {
   };
 }
 
-export function validateProvider(body: any): ValidationResult {
+export function validateProvider(body: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
 
   // Validate name
@@ -185,7 +235,7 @@ export function validateProvider(body: any): ValidationResult {
   };
 }
 
-export function validateProviderUpdate(body: any): ValidationResult {
+export function validateProviderUpdate(body: Record<string, unknown>): ValidationResult {
   const errors: string[] = [];
 
   // Only validate fields that are present — all are optional for updates
@@ -244,6 +294,14 @@ export function validateProviderUpdate(body: any): ValidationResult {
   if (body.models !== undefined) {
     if (!Array.isArray(body.models)) {
       errors.push("models must be an array");
+    }
+  }
+
+  if (body.connectionStrategy !== undefined) {
+    if (typeof body.connectionStrategy !== "string") {
+      errors.push("connectionStrategy must be a string");
+    } else if (!["priority", "round-robin", "random"].includes(body.connectionStrategy)) {
+      errors.push("connectionStrategy must be 'priority', 'round-robin', or 'random'");
     }
   }
 

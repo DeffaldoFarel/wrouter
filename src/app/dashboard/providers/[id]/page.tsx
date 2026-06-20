@@ -38,6 +38,7 @@ import {
   Download,
   Zap,
   ChevronRight,
+  Key,
 } from "lucide-react";
 import Link from "next/link";
 import { getProviderIcon } from "@/components/provider-icons";
@@ -235,6 +236,7 @@ export default function ProviderDetailPage() {
   const [prefix, setPrefix] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [connectionStrategy, setConnectionStrategy] = useState("priority");
   const [modelList, setModelList] = useState<string[]>([]);
   const [newModel, setNewModel] = useState("");
   const [modelSearch, setModelSearch] = useState("");
@@ -255,6 +257,43 @@ export default function ProviderDetailPage() {
     tokensOut: number;
   } | null>(null);
 
+  // Multi-key management
+  const [apiKeys, setApiKeys] = useState<Array<{
+    id: string;
+    name: string;
+    priority: number;
+    isActive: boolean;
+    errorCount: number;
+    maxErrors: number;
+    lastErrorCode: string | null;
+    lastUsedAt: string | null;
+    lastErrorAt: string | null;
+    rateLimitedUntil: string | null;
+    createdAt: string;
+  }>>([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [addKeyOpen, setAddKeyOpen] = useState(false);
+  const [editKeyOpen, setEditKeyOpen] = useState<string | null>(null);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyApiKey, setNewKeyApiKey] = useState("");
+  const [newKeyPriority, setNewKeyPriority] = useState(0);
+  const [newKeyMaxErrors, setNewKeyMaxErrors] = useState(5);
+
+  const fetchApiKeys = useCallback(async () => {
+    setKeysLoading(true);
+    try {
+      const res = await fetch(`/api/providers/${params.id}/keys`);
+      if (res.ok) {
+        const data = await res.json();
+        setApiKeys(data.keys || []);
+      }
+    } catch {
+      // silent
+    } finally {
+      setKeysLoading(false);
+    }
+  }, [params.id]);
+
   const fetchProvider = useCallback(async () => {
     try {
       const res = await fetch(`/api/providers/${params.id}`);
@@ -264,6 +303,7 @@ export default function ProviderDetailPage() {
         setName(data.name);
         setPrefix(data.prefix);
         setBaseUrl(data.baseUrl);
+        setConnectionStrategy(((data as Record<string, unknown>).connectionStrategy as string) ?? "priority");
         setModelList(data.models);
       } else {
         toast.error("Provider not found");
@@ -350,7 +390,8 @@ export default function ProviderDetailPage() {
   useEffect(() => {
     fetchProvider();
     fetchStats();
-  }, [fetchProvider, fetchStats]);
+    fetchApiKeys();
+  }, [fetchProvider, fetchStats, fetchApiKeys]);
 
   // Load cached health from localStorage instead of auto-checking
   // User must manually click "Refresh" to perform a real check
@@ -408,6 +449,7 @@ export default function ProviderDetailPage() {
     prefix !== (provider?.prefix ?? "") ||
     (provider?.type !== "apikey" && baseUrl !== (provider?.baseUrl ?? "")) ||
     apiKey !== "" ||
+    connectionStrategy !== ((provider as unknown as Record<string, unknown>)?.connectionStrategy ?? "priority") ||
     JSON.stringify(modelList) !== JSON.stringify(provider?.models ?? []);
 
   async function handleSave(e: React.FormEvent) {
@@ -417,6 +459,7 @@ export default function ProviderDetailPage() {
       prefix,
       baseUrl,
       models: modelList,
+      connectionStrategy,
     };
     if (apiKey) payload.apiKey = apiKey;
 
@@ -545,6 +588,85 @@ export default function ProviderDetailPage() {
     toast.success("Test complete");
   }
 
+  // ─── API Key CRUD ───
+
+  async function handleAddKey() {
+    if (!newKeyApiKey.trim()) {
+      toast.error("API key is required");
+      return;
+    }
+    try {
+      const res = await fetch(`/api/providers/${params.id}/keys`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newKeyName || undefined,
+          apiKey: newKeyApiKey,
+          priority: newKeyPriority,
+          maxErrors: newKeyMaxErrors,
+        }),
+      });
+      if (res.ok) {
+        toast.success("API key added");
+        setNewKeyName("");
+        setNewKeyApiKey("");
+        setNewKeyPriority(0);
+        setAddKeyOpen(false);
+        fetchApiKeys();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Failed to add key");
+      }
+    } catch {
+      toast.error("Connection error");
+    }
+  }
+
+  async function handleToggleKey(connectionId: string) {
+    try {
+      const res = await fetch(`/api/providers/${params.id}/keys/${connectionId}`, {
+        method: "PATCH",
+      });
+      if (res.ok) {
+        fetchApiKeys();
+        toast.success("Key toggled");
+      }
+    } catch {
+      toast.error("Failed to toggle key");
+    }
+  }
+
+  async function handleDeleteKey(connectionId: string) {
+    try {
+      const res = await fetch(`/api/providers/${params.id}/keys/${connectionId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        fetchApiKeys();
+        toast.success("Key deleted");
+      }
+    } catch {
+      toast.error("Failed to delete key");
+    }
+  }
+
+  async function handleUpdateKey(connectionId: string, updates: Record<string, unknown>) {
+    try {
+      const res = await fetch(`/api/providers/${params.id}/keys/${connectionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        fetchApiKeys();
+        setEditKeyOpen(null);
+        toast.success("Key updated");
+      }
+    } catch {
+      toast.error("Failed to update key");
+    }
+  }
+
   // ─── Filtered models by search ───
   const filteredModels = useMemo(() => {
     if (!modelSearch.trim()) return modelList;
@@ -601,7 +723,7 @@ export default function ProviderDetailPage() {
               if (Icon) {
                 return (
                   <div className="h-12 w-12 rounded-lg bg-muted/50 border flex items-center justify-center shrink-0">
-                    <Icon className="h-7 w-7" />
+                    <Icon size={28} />
                   </div>
                 );
               }
@@ -746,8 +868,9 @@ export default function ProviderDetailPage() {
               )}
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+          <CardContent className="space-y-6">
+            {/* Row 1: Display Name | Prefix | Base URL */}
+            <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="name">Display Name</Label>
                 <Input
@@ -772,61 +895,265 @@ export default function ProviderDetailPage() {
                   <code className="bg-muted px-1 py-0.5 rounded">{prefix}/model-name</code>
                 </p>
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="baseUrl">Base URL</Label>
-              {provider.type === "apikey" ? (
-                <div className="flex items-center gap-2">
+              <div className="space-y-2">
+                <Label htmlFor="baseUrl">Base URL</Label>
+                {provider.type === "apikey" ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="baseUrl"
+                      value={baseUrl}
+                      disabled
+                      className="font-mono text-sm text-muted-foreground bg-muted"
+                    />
+                    <Badge variant="outline" className="text-[10px] shrink-0">
+                      Preconfigured
+                    </Badge>
+                  </div>
+                ) : (
                   <Input
                     id="baseUrl"
                     value={baseUrl}
-                    disabled
-                    className="font-mono text-sm text-muted-foreground bg-muted"
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    required
+                    className="font-mono text-sm"
                   />
-                  <Badge variant="outline" className="text-[10px] shrink-0">
-                    Preconfigured
-                  </Badge>
-                </div>
-              ) : (
-                <Input
-                  id="baseUrl"
-                  value={baseUrl}
-                  onChange={(e) => setBaseUrl(e.target.value)}
-                  required
-                  className="font-mono text-sm"
-                />
-              )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="apiKey" className="flex items-center justify-between">
-                <span>API Key</span>
-                <span className="text-xs text-muted-foreground font-normal">
-                  Leave empty to keep current
-                </span>
-              </Label>
-              <div className="relative">
-                <Input
-                  id="apiKey"
-                  type={showApiKey ? "text" : "password"}
-                  placeholder={`Current: ${maskApiKey(provider.apiKey)}`}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  className="pr-10 font-mono text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  tabIndex={-1}
-                >
-                  {showApiKey ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
+                )}
               </div>
             </div>
+
+            {/* Separator */}
+            <div className="border-t" />
+
+            {/* Row 2: API Keys header + Key Strategy */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Key className="h-4 w-4" />
+                <span className="text-sm font-semibold">API Keys</span>
+                <Badge variant="outline" className="text-[10px]">
+                  {apiKeys.length} key{apiKeys.length !== 1 ? "s" : ""}
+                </Badge>
+                <Dialog open={addKeyOpen} onOpenChange={(open) => {
+                  setAddKeyOpen(open);
+                  if (open) {
+                    setNewKeyName("");
+                    setNewKeyApiKey("");
+                    setNewKeyPriority(0);
+                  }
+                }}>
+                  <DialogTrigger>
+                    <span className="inline-flex items-center justify-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer">
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                      Add Key
+                    </span>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Add API Key</DialogTitle>
+                      <DialogDescription>
+                        Add a new API key for this provider. Keys are used based on priority and strategy.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                      <div>
+                        <Label>Name (optional)</Label>
+                        <Input
+                          value={newKeyName}
+                          onChange={(e) => setNewKeyName(e.target.value)}
+                          placeholder="e.g. Primary Key"
+                        />
+                      </div>
+                      <div>
+                        <Label>API Key</Label>
+                        <Input
+                          value={newKeyApiKey}
+                          onChange={(e) => setNewKeyApiKey(e.target.value)}
+                          placeholder="sk-..."
+                          className="font-mono"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label>Priority</Label>
+                          <Input
+                            type="number"
+                            value={newKeyPriority}
+                            onChange={(e) => setNewKeyPriority(Number(e.target.value))}
+                          />
+                        </div>
+                        <div>
+                          <Label>Max Errors</Label>
+                          <Input
+                            type="number"
+                            value={newKeyMaxErrors}
+                            onChange={(e) => setNewKeyMaxErrors(Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setAddKeyOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddKey}>Add Key</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground whitespace-nowrap">Key Strategy</Label>
+                <select
+                  value={connectionStrategy}
+                  onChange={(e) => setConnectionStrategy(e.target.value)}
+                  className="flex h-8 rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="priority">Priority</option>
+                  <option value="round-robin">Round Robin</option>
+                  <option value="random">Random</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Keys list */}
+            {keysLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : apiKeys.length === 0 ? (
+              <div className="py-6 text-center border-2 border-dashed rounded-md space-y-2">
+                <Key className="h-6 w-6 text-muted-foreground mx-auto" />
+                <p className="text-sm font-medium">No API keys added yet</p>
+                <p className="text-xs text-muted-foreground">
+                  Add keys to enable multi-key load balancing for this provider
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {apiKeys.map((key) => {
+                  const isRateLimited = key.rateLimitedUntil && new Date(key.rateLimitedUntil) > new Date();
+                  const isDisabledByErrors = key.maxErrors > 0 && key.errorCount >= key.maxErrors;
+                  const isEffectiveDisabled = !key.isActive || isDisabledByErrors || !!isRateLimited;
+
+                  return (
+                    <div
+                      key={key.id}
+                      className={`rounded-md border px-4 py-3 transition-colors ${
+                        isEffectiveDisabled
+                          ? "border-muted/60 bg-muted/20 opacity-60"
+                          : "border-border"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium">{key.name}</span>
+                            <Badge variant="outline" className="text-[10px]">
+                              P{key.priority}
+                            </Badge>
+                            {!key.isActive && (
+                              <Badge variant="secondary" className="text-[10px]">
+                                Disabled
+                              </Badge>
+                            )}
+                            {isDisabledByErrors && (
+                              <Badge variant="destructive" className="text-[10px]">
+                                {key.errorCount}/{key.maxErrors} errors
+                              </Badge>
+                            )}
+                            {isRateLimited && (
+                              <Badge variant="destructive" className="text-[10px]">
+                                Rate limited
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
+                            <span>Last error: {key.lastErrorCode || "—"}</span>
+                            {key.lastUsedAt && (
+                              <span>Last used: {new Date(key.lastUsedAt).toLocaleString()}</span>
+                            )}
+                            {key.lastErrorAt && (
+                              <span>Last error: {new Date(key.lastErrorAt).toLocaleString()}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Switch
+                            checked={key.isActive}
+                            onCheckedChange={() => handleToggleKey(key.id)}
+                            disabled={keysLoading}
+                          />
+                          <Dialog open={editKeyOpen === key.id} onOpenChange={(open) => {
+                            if (!open) setEditKeyOpen(null);
+                          }}>
+                            <DialogTrigger>
+                              <span
+                                className="inline-flex items-center justify-center h-7 w-7 p-0 rounded-md hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                                onClick={() => setEditKeyOpen(key.id)}
+                              >
+                                <Settings className="h-3.5 w-3.5" />
+                              </span>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Edit Key</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-4 py-2">
+                                <div>
+                                  <Label>Name</Label>
+                                  <Input
+                                    defaultValue={key.name}
+                                    id={`edit-key-name-${key.id}`}
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Priority</Label>
+                                  <Input
+                                    type="number"
+                                    defaultValue={key.priority}
+                                    id={`edit-key-priority-${key.id}`}
+                                  />
+                                </div>
+                                <div>
+                                  <Label>Max Errors</Label>
+                                  <Input
+                                    type="number"
+                                    defaultValue={key.maxErrors}
+                                    id={`edit-key-maxerrors-${key.id}`}
+                                  />
+                                </div>
+                              </div>
+                              <DialogFooter>
+                                <Button variant="outline" onClick={() => setEditKeyOpen(null)}>
+                                  Cancel
+                                </Button>
+                                <Button onClick={() => {
+                                  const nameEl = document.getElementById(`edit-key-name-${key.id}`) as HTMLInputElement;
+                                  const priorityEl = document.getElementById(`edit-key-priority-${key.id}`) as HTMLInputElement;
+                                  const maxErrorsEl = document.getElementById(`edit-key-maxerrors-${key.id}`) as HTMLInputElement;
+                                  handleUpdateKey(key.id, {
+                                    name: nameEl.value,
+                                    priority: Number(priorityEl.value),
+                                    maxErrors: Number(maxErrorsEl.value),
+                                  });
+                                }}>Save</Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive h-7 w-7 p-0"
+                            onClick={() => handleDeleteKey(key.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -1124,6 +1451,7 @@ export default function ProviderDetailPage() {
                     setName(provider.name);
                     setPrefix(provider.prefix);
                     setBaseUrl(provider.baseUrl);
+                    setConnectionStrategy((provider as unknown as Record<string, unknown>).connectionStrategy as string ?? "priority");
                     setApiKey("");
                     setModelList(provider.models);
                   }

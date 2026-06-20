@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     if (providerId) {
       const provider = db.select().from(providers).where(eq(providers.id, providerId)).get();
       if (provider) {
-        if (!resolvedApiKey) resolvedApiKey = safeDecryptApiKey(provider.apiKey);
+        if (!resolvedApiKey && provider.apiKey) resolvedApiKey = safeDecryptApiKey(provider.apiKey);
         if (!resolvedBaseUrl) resolvedBaseUrl = provider.baseUrl;
         providerType = provider.type ?? "custom";
       }

@@ -4,6 +4,13 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -655,23 +662,32 @@ export default function SettingsPage() {
                     <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                   )}
                 </div>
-                <select
+                <Select
                   value={settings.log_retention_days || "60"}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     updateSetting(
                       "log_retention_days",
-                      e.target.value,
+                      value ?? "60",
                       "Log retention"
                     )
                   }
-                  className="w-full max-w-xs h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring mt-2"
                 >
-                  {LOG_RETENTION_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger className="w-full max-w-xs mt-2">
+                    <SelectValue>
+                      {(value: string) => {
+                        const opt = LOG_RETENTION_OPTIONS.find((o) => o.value === value);
+                        return opt?.label || value;
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LOG_RETENTION_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </Section>

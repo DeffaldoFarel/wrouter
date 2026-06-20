@@ -12,6 +12,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -30,9 +31,90 @@ import {
   AlertCircle,
   ExternalLink,
   Box,
+  Shield,
 } from "lucide-react";
 import { KNOWN_API_KEY_PROVIDERS, type KnownApiKeyProvider } from "@/lib/constants/providers";
-import { getProviderIcon } from "@/components/provider-icons";
+import { ProviderIcon, KNOWN_ICON_PREFIXES } from "@/components/provider-icons";
+import { OAuthConnectionManager } from "@/components/oauth-connection-manager";
+import { OAuthFlowModal } from "@/components/oauth-flow-modal";
+
+// ─────────────────────────────────────────────
+//  Known OAuth Providers
+// ─────────────────────────────────────────────
+interface KnownOAuthProvider {
+  id: string;
+  name: string;
+  prefix: string;
+  description: string;
+  brandColor: string;
+  iconLabel: string;
+}
+
+const KNOWN_OAUTH_PROVIDERS: KnownOAuthProvider[] = [
+  {
+    id: "claude",
+    name: "Claude Code",
+    prefix: "claude",
+    description: "Anthropic Claude via OAuth device code flow. Auto-refreshing tokens.",
+    brandColor: "#D97757",
+    iconLabel: "CL",
+  },
+  {
+    id: "codex",
+    name: "OpenAI Codex",
+    prefix: "codex",
+    description: "OpenAI Codex CLI via OAuth. Supports GPT and o-series models.",
+    brandColor: "#10A37F",
+    iconLabel: "OA",
+  },
+  {
+    id: "github",
+    name: "GitHub Copilot",
+    prefix: "github",
+    description: "GitHub Copilot OAuth connection. Access to Copilot models.",
+    brandColor: "#6e40c9",
+    iconLabel: "GH",
+  },
+  {
+    id: "cursor",
+    name: "Cursor",
+    prefix: "cursor",
+    description: "Cursor editor OAuth. Auto-refreshing access to Cursor models.",
+    brandColor: "#2563EB",
+    iconLabel: "CU",
+  },
+  {
+    id: "kiro",
+    name: "Kiro",
+    prefix: "kiro",
+    description: "AWS CodeWhisperer / Kiro via SSO OIDC device code flow.",
+    brandColor: "#FF9900",
+    iconLabel: "KI",
+  },
+  {
+    id: "gemini-cli",
+    name: "Gemini CLI",
+    prefix: "gemini-cli",
+    description: "Google Gemini via OAuth 2.0. Auto-discovers Cloud project.",
+    brandColor: "#4285F4",
+    iconLabel: "GE",
+  },
+];
+
+interface OAuthConnection {
+  id: string;
+  provider: string;
+  name: string;
+  email: string | null;
+  authType: "oauth" | "apikey" | "access_token";
+  isActive: boolean;
+  priority: number;
+  testStatus: "untested" | "active" | "error" | "expired";
+  expiresAt: string | null;
+  lastRefreshAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+}
 
 interface Provider {
   id: string;
@@ -78,15 +160,14 @@ function BrandIcon({
   };
 
   // Try to get a real brand SVG icon by prefix
-  const Icon = prefix ? getProviderIcon(prefix) : null;
+  const hasIcon = prefix ? KNOWN_ICON_PREFIXES.has(prefix) : false;
 
-  if (Icon) {
+  if (hasIcon) {
     return (
       <div
         className={`flex items-center justify-center rounded-md shrink-0 bg-muted/50 border ${sizes[size].box}`}
-        style={brandColor ? { color: brandColor } : undefined}
       >
-        <Icon className={sizes[size].icon} />
+        <ProviderIcon prefix={prefix} size={size === "sm" ? 16 : size === "md" ? 20 : 24} />
       </div>
     );
   }
@@ -169,16 +250,18 @@ function ApiKeyProviderSlot({
   healthMap,
   onToggle,
   onCheckHealth,
+  onConnect,
 }: {
   known: KnownApiKeyProvider;
   connected: Provider | null;
   healthMap: Record<string, HealthResult>;
   onToggle: (id: string, enabled: boolean) => void;
   onCheckHealth: (id: string) => void;
+  onConnect: (prefix: string) => void;
 }) {
   const href = connected
     ? `/dashboard/providers/${connected.id}`
-    : `/dashboard/providers/setup/${known.prefix}`;
+    : undefined;
 
   const health = connected ? healthMap[connected.id] : undefined;
 
@@ -191,15 +274,27 @@ function ApiKeyProviderSlot({
       <CardContent className="space-y-3">
         {/* Header: brand icon + name + (toggle | not-set-up) */}
         <div className="flex items-start justify-between gap-2">
-          <Link href={href} className="flex items-start gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity">
-            <BrandIcon prefix={known.prefix} brandColor={known.brandColor} label={known.iconLabel} size="md" />
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-sm leading-tight truncate">{known.name}</p>
-              <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                {known.prefix}/
-              </p>
+          {connected ? (
+            <Link href={href!} className="flex items-start gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity">
+              <BrandIcon prefix={known.prefix} brandColor={known.brandColor} label={known.iconLabel} size="md" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm leading-tight truncate">{known.name}</p>
+                <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                  {known.prefix}/
+                </p>
+              </div>
+            </Link>
+          ) : (
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <BrandIcon prefix={known.prefix} brandColor={known.brandColor} label={known.iconLabel} size="md" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm leading-tight truncate">{known.name}</p>
+                <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                  {known.prefix}/
+                </p>
+              </div>
             </div>
-          </Link>
+          )}
 
           {/* Right side: Switch (when connected) or "Not set up" tag */}
           <div className="shrink-0">
@@ -218,11 +313,17 @@ function ApiKeyProviderSlot({
         </div>
 
         {/* Description */}
-        <Link href={href} className="block hover:opacity-80 transition-opacity">
+        {connected ? (
+          <Link href={href!} className="block hover:opacity-80 transition-opacity">
+            <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+              {known.description}
+            </p>
+          </Link>
+        ) : (
           <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
             {known.description}
           </p>
-        </Link>
+        )}
 
         {/* Footer */}
         {connected ? (
@@ -251,10 +352,14 @@ function ApiKeyProviderSlot({
             </button>
           </div>
         ) : (
-          <Link href={href} className="flex items-center gap-1 text-[11px] text-primary hover:underline">
+          <button
+            type="button"
+            onClick={() => onConnect(known.prefix)}
+            className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+          >
             <Plus className="h-3 w-3" />
             Connect now
-          </Link>
+          </button>
         )}
       </CardContent>
     </Card>
@@ -427,9 +532,38 @@ export default function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [healthMap, setHealthMap] = useState<Record<string, HealthResult>>({});
+  const [healthMap, setHealthMap] = useState<Record<string, HealthResult>>(() => {
+    try {
+      const cached = localStorage.getItem("wrouter:health-cache");
+      if (cached) {
+        const parsed: Record<string, HealthResult> = JSON.parse(cached);
+        const FRESH_TTL = 30 * 60 * 1000;
+        const now = Date.now();
+        const fresh: Record<string, HealthResult> = {};
+        for (const [id, result] of Object.entries(parsed)) {
+          if (result.checkedAt && now - result.checkedAt < FRESH_TTL) {
+            fresh[id] = result;
+          }
+        }
+        if (Object.keys(fresh).length > 0) {
+          return fresh;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return {};
+  });
   const [checkingAll, setCheckingAll] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [oauthOpen, setOauthOpen] = useState(false);
+  const [oauthConnections, setOauthConnections] = useState<OAuthConnection[]>([]);
+  const [oauthSelectedProvider, setOauthSelectedProvider] = useState<string | null>(null);
+  const [oauthFlowOpen, setOauthFlowOpen] = useState(false);
+  const [oauthFlowProvider, setOauthFlowProvider] = useState<string | null>(null);
+  const [apiKeySetupOpen, setApiKeySetupOpen] = useState(false);
+  const [apiKeySetupPrefix, setApiKeySetupPrefix] = useState<string | null>(null);
+  const [apiKeySetupValue, setApiKeySetupValue] = useState("");
 
   // Form state
   const [name, setName] = useState("");
@@ -452,9 +586,36 @@ export default function ProvidersPage() {
     }
   }, []);
 
+  const fetchOAuthConnections = useCallback(async () => {
+    try {
+      const res = await fetch("/api/oauth/connections");
+      if (res.ok) {
+        const data = await res.json();
+        setOauthConnections(data.connections || []);
+      }
+    } catch {
+      // silently fail — oauth is optional
+    }
+  }, []);
+
   useEffect(() => {
-    fetchProviders();
-  }, [fetchProviders]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/providers");
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setProviders(data);
+        }
+      } catch {
+        if (!cancelled) toast.error("Failed to fetch providers");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    fetchOAuthConnections();
+    return () => { cancelled = true; };
+  }, [fetchOAuthConnections]);
 
   const checkHealth = useCallback(async (providerId: string) => {
     setHealthMap((prev) => ({
@@ -499,32 +660,6 @@ export default function ProvidersPage() {
     setCheckingAll(false);
     toast.success("Health check complete");
   }, [providers, checkHealth]);
-
-  // Load cached health results from localStorage on mount
-  // No automatic health check — user must click "Check All" or per-card "Check"
-  // This avoids spamming provider /models endpoints on every page visit
-  useEffect(() => {
-    try {
-      const cached = localStorage.getItem("wrouter:health-cache");
-      if (cached) {
-        const parsed: Record<string, HealthResult> = JSON.parse(cached);
-        // Only keep results from the last 30 minutes (older = stale, treat as unknown)
-        const FRESH_TTL = 30 * 60 * 1000;
-        const now = Date.now();
-        const fresh: Record<string, HealthResult> = {};
-        for (const [id, result] of Object.entries(parsed)) {
-          if (result.checkedAt && now - result.checkedAt < FRESH_TTL) {
-            fresh[id] = result;
-          }
-        }
-        if (Object.keys(fresh).length > 0) {
-          setHealthMap(fresh);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
 
   function resetForm() {
     setName("");
@@ -817,6 +952,134 @@ export default function ProvidersPage() {
         </div>
       )}
 
+      {/* ═══ OAuth Providers ═══ */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">OAuth Providers</h3>
+            <Badge variant="secondary" className="text-[10px]">
+              {KNOWN_OAUTH_PROVIDERS.length} available
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Connect via OAuth for auto-refresh tokens
+          </p>
+        </div>
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+          {KNOWN_OAUTH_PROVIDERS.map((oauthProvider) => {
+            const connections = oauthConnections.filter(
+              (c) => c.provider === oauthProvider.id
+            );
+            const activeConnection = connections.find((c) => c.isActive);
+            const hasConnection = connections.length > 0;
+
+            return (
+              <Card
+                key={oauthProvider.id}
+                className={`group transition-all hover:shadow-md hover:border-primary/40 ${
+                  !hasConnection ? "border-dashed" : ""
+                }`}
+              >
+                <CardContent className="space-y-3">
+                  {/* Header: brand icon + name + status */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="flex items-center justify-center rounded-md shrink-0 h-8 w-8 bg-muted/50 border">
+                        <ProviderIcon prefix={oauthProvider.id} size={20} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-sm leading-tight truncate">
+                          {oauthProvider.name}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                          {oauthProvider.prefix}/
+                        </p>
+                      </div>
+                    </div>
+                    <div className="shrink-0">
+                      {hasConnection ? (
+                        <Badge
+                          variant={activeConnection?.testStatus === "active" ? "default" : "secondary"}
+                          className="text-[10px]"
+                        >
+                          {activeConnection?.testStatus === "active" ? (
+                            <><CheckCircle2 className="h-3 w-3 mr-1" />Connected</>
+                          ) : activeConnection?.testStatus === "error" ? (
+                            <><XCircle className="h-3 w-3 mr-1" />Error</>
+                          ) : activeConnection?.testStatus === "expired" ? (
+                            <><Clock className="h-3 w-3 mr-1" />Expired</>
+                          ) : (
+                            <><AlertCircle className="h-3 w-3 mr-1" />Untested</>
+                          )}
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                          Not connected
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+                    {oauthProvider.description}
+                  </p>
+
+                  {/* Footer */}
+                  {hasConnection ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-muted-foreground">
+                        {connections.length} connection{connections.length !== 1 ? "s" : ""}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => {
+                          setOauthSelectedProvider(oauthProvider.id);
+                          setOauthOpen(true);
+                        }}
+                      >
+                        <Shield className="h-3 w-3 mr-1" />
+                        Manage
+                      </Button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOauthFlowProvider(oauthProvider.id);
+                        setOauthFlowOpen(true);
+                      }}
+                      className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Connect now
+                    </button>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+        <OAuthConnectionManager open={oauthOpen} onOpenChange={(open) => {
+          setOauthOpen(open);
+          if (!open) {
+            setOauthSelectedProvider(null);
+            fetchOAuthConnections();
+          }
+        }} filterProvider={oauthSelectedProvider} />
+        <OAuthFlowModal
+          open={oauthFlowOpen}
+          onOpenChange={setOauthFlowOpen}
+          provider={oauthFlowProvider}
+          onSuccess={() => {
+            fetchOAuthConnections();
+          }}
+        />
+      </div>
+
       {/* ═══ API Key Providers ═══ */}
       <div className="space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -848,6 +1111,10 @@ export default function ProvidersPage() {
                   healthMap={healthMap}
                   onToggle={toggleProvider}
                   onCheckHealth={checkHealth}
+                  onConnect={(prefix) => {
+                    setApiKeySetupPrefix(prefix);
+                    setApiKeySetupOpen(true);
+                  }}
                 />
               );
             })}
@@ -943,6 +1210,106 @@ export default function ProvidersPage() {
           </a>
         </div>
       </div>
+
+      {/* ═══ API Key Setup Modal ═══ */}
+      <Dialog open={apiKeySetupOpen} onOpenChange={(open) => {
+        setApiKeySetupOpen(open);
+        if (!open) {
+          setApiKeySetupPrefix(null);
+          setApiKeySetupValue("");
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5" />
+              Connect {KNOWN_API_KEY_PROVIDERS.find((p) => p.prefix === apiKeySetupPrefix)?.name || "Provider"}
+            </DialogTitle>
+          </DialogHeader>
+          {(() => {
+            const setupProvider = KNOWN_API_KEY_PROVIDERS.find((p) => p.prefix === apiKeySetupPrefix);
+            if (!setupProvider) return null;
+            return (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Enter your API key to start routing requests through {setupProvider.name}.
+                </p>
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between p-2 rounded-md bg-muted/30 border">
+                    <span className="text-xs text-muted-foreground">BASE URL</span>
+                    <code className="text-xs font-mono truncate max-w-[200px]">{setupProvider.baseUrl}</code>
+                  </div>
+                  <div className="flex items-center justify-between p-2 rounded-md bg-muted/30 border">
+                    <span className="text-xs text-muted-foreground">PREFIX</span>
+                    <code className="text-xs font-mono">{setupProvider.prefix}/</code>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="apikey-input" className="flex items-center gap-2">
+                    <KeyRound className="h-3.5 w-3.5" />
+                    API Key
+                  </Label>
+                  <Input
+                    id="apikey-input"
+                    type="password"
+                    placeholder={setupProvider.keyHint || "Enter API key..."}
+                    value={apiKeySetupValue}
+                    onChange={(e) => setApiKeySetupValue(e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                  {setupProvider.docsUrl && (
+                    <a
+                      href={setupProvider.docsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                    >
+                      Get API key <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setApiKeySetupOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    disabled={!apiKeySetupValue.trim()}
+                    onClick={async () => {
+                      try {
+                        const res = await fetch("/api/providers", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            name: setupProvider.name,
+                            prefix: setupProvider.prefix,
+                            baseUrl: setupProvider.baseUrl,
+                            apiKey: apiKeySetupValue.trim(),
+                            type: "apikey",
+                          }),
+                        });
+                        if (!res.ok) {
+                          const data = await res.json();
+                          throw new Error(data.error || "Failed to connect");
+                        }
+                        toast.success(`${setupProvider.name} connected!`);
+                        setApiKeySetupOpen(false);
+                        setApiKeySetupPrefix(null);
+                        setApiKeySetupValue("");
+                        fetchProviders();
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : "Failed to connect");
+                      }
+                    }}
+                  >
+                    <Zap className="h-4 w-4 mr-1" />
+                    Connect
+                  </Button>
+                </DialogFooter>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

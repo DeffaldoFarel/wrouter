@@ -17,9 +17,43 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const limit = parseInt(url.searchParams.get("limit") || "50");
   const offset = parseInt(url.searchParams.get("offset") || "0");
+  const id = url.searchParams.get("id"); // Fetch single log with details
 
-  // LEFT JOIN with api_keys + providers so we get readable names
-  // (api keys can be deleted; LEFT JOIN keeps the log row in that case).
+  // Single log fetch (with full details) — used by Sheet on-demand
+  if (id) {
+    const row = db
+      .select({
+        id: requestLogs.id,
+        timestamp: requestLogs.timestamp,
+        model: requestLogs.model,
+        providerId: requestLogs.providerId,
+        providerName: providers.name,
+        providerPrefix: providers.prefix,
+        comboId: requestLogs.comboId,
+        apiKeyId: requestLogs.apiKeyId,
+        apiKeyName: apiKeys.name,
+        tokensIn: requestLogs.tokensIn,
+        tokensOut: requestLogs.tokensOut,
+        latencyMs: requestLogs.latencyMs,
+        status: requestLogs.status,
+        isStreaming: requestLogs.isStreaming,
+        error: requestLogs.error,
+        requestDetail: requestLogs.requestDetail,
+        responseDetail: requestLogs.responseDetail,
+      })
+      .from(requestLogs)
+      .leftJoin(apiKeys, eq(requestLogs.apiKeyId, apiKeys.id))
+      .leftJoin(providers, eq(requestLogs.providerId, providers.id))
+      .where(eq(requestLogs.id, id))
+      .get();
+
+    if (!row) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    return NextResponse.json({ log: row });
+  }
+
+  // List fetch (without heavy detail fields) — used by table
   const rows = db
     .select({
       id: requestLogs.id,
@@ -37,8 +71,6 @@ export async function GET(req: NextRequest) {
       status: requestLogs.status,
       isStreaming: requestLogs.isStreaming,
       error: requestLogs.error,
-      requestDetail: requestLogs.requestDetail,
-      responseDetail: requestLogs.responseDetail,
     })
     .from(requestLogs)
     .leftJoin(apiKeys, eq(requestLogs.apiKeyId, apiKeys.id))

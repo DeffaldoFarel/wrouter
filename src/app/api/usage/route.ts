@@ -29,40 +29,6 @@ function getStartDate(filter: string): Date {
 
 const USE_HOURLY = new Set(["today", "24h"]);
 
-// --- Hour buckets ---
-function buildHourBuckets(startDate: Date, now: Date) {
-  const reqBuckets: Record<string, { hour: string; requests: number; errors: number }> = {};
-  const tokBuckets: Record<string, { hour: string; tokensIn: number; tokensOut: number }> = {};
-  const cursor = new Date(startDate);
-  cursor.setMinutes(0, 0, 0);
-  const end = new Date(now);
-  end.setMinutes(0, 0, 0);
-  while (cursor <= end) {
-    const key = cursor.toISOString().slice(0, 13); // "2024-06-16T14"
-    reqBuckets[key] = { hour: key, requests: 0, errors: 0 };
-    tokBuckets[key] = { hour: key, tokensIn: 0, tokensOut: 0 };
-    cursor.setHours(cursor.getHours() + 1);
-  }
-  return { reqBuckets, tokBuckets };
-}
-
-// --- Day buckets ---
-function buildDayBuckets(startDate: Date, now: Date) {
-  const reqBuckets: Record<string, { date: string; requests: number; errors: number }> = {};
-  const tokBuckets: Record<string, { date: string; tokensIn: number; tokensOut: number }> = {};
-  const cursor = new Date(startDate);
-  cursor.setHours(0, 0, 0, 0);
-  const end = new Date(now);
-  end.setHours(0, 0, 0, 0);
-  while (cursor <= end) {
-    const key = cursor.toISOString().slice(0, 10);
-    reqBuckets[key] = { date: key, requests: 0, errors: 0 };
-    tokBuckets[key] = { date: key, tokensIn: 0, tokensOut: 0 };
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return { reqBuckets, tokBuckets };
-}
-
 export async function GET(req: NextRequest) {
   if (!checkAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

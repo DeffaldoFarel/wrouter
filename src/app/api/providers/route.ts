@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const result = allProviders.map((p) => ({
     ...p,
     models: JSON.parse(p.models),
-    apiKey: maskApiKey(safeDecryptApiKey(p.apiKey)),
+    apiKey: p.apiKey ? maskApiKey(safeDecryptApiKey(p.apiKey)) : null,
   }));
 
   return NextResponse.json(result);

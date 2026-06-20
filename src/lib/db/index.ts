@@ -6,6 +6,11 @@ import fs from "fs";
 import bcrypt from "bcryptjs";
 import { randomInt } from "crypto";
 
+// Bootstrap secrets on first boot (generate random JWT_SECRET if not set)
+// Must run before any module that depends on JWT_SECRET loads.
+import { bootstrapSecrets } from "../bootstrap";
+bootstrapSecrets();
+
 const DATA_DIR = path.join(process.cwd(), "data");
 
 // Ensure data directory exists
@@ -158,6 +163,60 @@ export function initializeDatabase() {
   // Migration: add is_streaming column to request_logs if not exists
   try {
     sqlite.exec(`ALTER TABLE request_logs ADD COLUMN is_streaming INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Migration: add provider_connections table for OAuth support
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS provider_connections (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      auth_type TEXT NOT NULL,
+      name TEXT,
+      email TEXT,
+      priority INTEGER,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      data TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS pc_provider_idx ON provider_connections(provider);
+    CREATE INDEX IF NOT EXISTS pc_provider_active_idx ON provider_connections(provider, is_active);
+    CREATE INDEX IF NOT EXISTS pc_priority_idx ON provider_connections(priority);
+  `);
+
+  // Migration: add connection_strategy column to providers for multi-key support
+  try {
+    sqlite.exec(`ALTER TABLE providers ADD COLUMN connection_strategy TEXT NOT NULL DEFAULT 'priority'`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Migration: add provider_id and error tracking columns to provider_connections
+  const multiKeyColumns = [
+    `ALTER TABLE provider_connections ADD COLUMN provider_id TEXT REFERENCES providers(id)`,
+    `ALTER TABLE provider_connections ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE provider_connections ADD COLUMN last_error_code TEXT`,
+    `ALTER TABLE provider_connections ADD COLUMN last_error_at TEXT`,
+    `ALTER TABLE provider_connections ADD COLUMN rate_limit INTEGER`,
+    `ALTER TABLE provider_connections ADD COLUMN rate_limit_window INTEGER`,
+    `ALTER TABLE provider_connections ADD COLUMN current_usage INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE provider_connections ADD COLUMN last_used_at TEXT`,
+    `ALTER TABLE provider_connections ADD COLUMN rate_limited_until TEXT`,
+    `ALTER TABLE provider_connections ADD COLUMN max_errors INTEGER NOT NULL DEFAULT 5`,
+  ];
+  for (const stmt of multiKeyColumns) {
+    try { sqlite.exec(stmt); } catch { /* column already exists */ }
+  }
+
+  // New indexes for provider_connections
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS pc_provider_id_idx ON provider_connections(provider_id)`); } catch {}
+  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS pc_provider_id_active_idx ON provider_connections(provider_id, is_active)`); } catch {}
+
+  // Migration: add cost_usd column to request_logs if not exists
+  try {
+    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN cost_usd TEXT`);
   } catch {
     // Column already exists, ignore
   }

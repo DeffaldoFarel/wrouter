@@ -8,6 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -941,21 +948,26 @@ export default function DashboardPage() {
             </div>
             {enabledKeys.length > 0 && (
               <div className="flex items-center gap-2">
-                <label htmlFor="config-api-key" className="text-xs text-muted-foreground">
+                <label className="text-xs text-muted-foreground">
                   Using key:
                 </label>
-                <select
-                  id="config-api-key"
-                  value={selectedKeyId}
-                  onChange={(e) => setSelectedKeyId(e.target.value)}
-                  className="px-3 py-1.5 text-sm border rounded-md bg-background hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {enabledKeys.map((key) => (
-                    <option key={key.id} value={key.id}>
-                      {key.name}
-                    </option>
-                  ))}
-                </select>
+                <Select value={selectedKeyId} onValueChange={(v) => setSelectedKeyId(v ?? "")}>
+                  <SelectTrigger size="sm" className="min-w-[240px]">
+                    <SelectValue placeholder="Select key">
+                      {(value: string) => {
+                        const key = enabledKeys.find((k) => k.id === value);
+                        return key?.name || "Select key";
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {enabledKeys.map((key) => (
+                      <SelectItem key={key.id} value={key.id}>
+                        {key.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
           </div>
@@ -996,7 +1008,7 @@ export default function DashboardPage() {
                   <CodeBlock code={getCurlModelsConfig()} label="bash" />
                 </div>
               </TabsContent>
-              <TabsContent value="claude-code" className="mt-4">
+              <TabsContent value="claude-code" className="mt-4 space-y-2">
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
                     Add to your Claude Code{" "}
@@ -1007,7 +1019,7 @@ export default function DashboardPage() {
                   <CodeBlock code={getClaudeCodeConfig()} label="json" />
                 </div>
               </TabsContent>
-              <TabsContent value="opencode" className="mt-4">
+              <TabsContent value="opencode" className="mt-4 space-y-2">
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">
                     Add to your{" "}
@@ -1071,7 +1083,7 @@ export default function DashboardPage() {
 
       {/* ═══ Edit API Key Dialog ═══ */}
       <Dialog open={editKeyDialogOpen} onOpenChange={setEditKeyDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Edit Allowed Models</DialogTitle>
             <DialogDescription>
@@ -1082,26 +1094,41 @@ export default function DashboardPage() {
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm font-medium">Available Models</label>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (!editingKey) return;
-                  const allModels = providers.flatMap((p) => {
-                    if (!p.enabled) return [];
-                    return p.models.map((m) => p.prefix + "/" + m);
-                  });
-                  const allComboSlugs = combos
-                    .filter((c) => c.enabled)
-                    .map((c) => c.slug);
-                  setEditingKey({
-                    ...editingKey,
-                    allowedModels: [...allModels, ...allComboSlugs],
-                  });
-                }}
-              >
-                Select All
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (!editingKey) return;
+                    const allModels = providers.flatMap((p) => {
+                      if (!p.enabled) return [];
+                      return p.models.map((m) => p.prefix + "/" + m);
+                    });
+                    const allComboSlugs = combos
+                      .filter((c) => c.enabled)
+                      .map((c) => c.slug);
+                    setEditingKey({
+                      ...editingKey,
+                      allowedModels: [...allModels, ...allComboSlugs],
+                    });
+                  }}
+                >
+                  Enable All
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (!editingKey) return;
+                    setEditingKey({
+                      ...editingKey,
+                      allowedModels: [],
+                    });
+                  }}
+                >
+                  Disable All
+                </Button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto border rounded-md p-3 space-y-2">
               {providers
@@ -1111,7 +1138,7 @@ export default function DashboardPage() {
                     <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                       {provider.name}
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                       {provider.models.map((model) => {
                         const fullModelName = provider.prefix + "/" + model;
                         const isSelected =
@@ -1156,7 +1183,7 @@ export default function DashboardPage() {
                   <div className="text-xs font-semibold text-primary uppercase tracking-wide">
                     Combos
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
                     {combos
                       .filter((c) => c.enabled)
                       .map((combo) => {

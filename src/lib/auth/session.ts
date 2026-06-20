@@ -35,14 +35,7 @@ export function hashPassword(password: string): string {
 export function verifyPassword(password: string): boolean {
   const storedPassword = getPassword();
   if (!storedPassword) return false;
-  
-  // Check if stored password is a bcrypt hash (starts with $2a$, $2b$, or $2y$)
-  if (storedPassword.startsWith("$2")) {
-    return bcrypt.compareSync(password, storedPassword);
-  }
-  
-  // Legacy plaintext comparison (for migration from old versions)
-  return password === storedPassword;
+  return bcrypt.compareSync(password, storedPassword);
 }
 
 export function createSession(): string {

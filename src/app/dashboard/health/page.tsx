@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, type ElementType } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,11 +80,11 @@ function formatRelativeTime(timestamp: number | null | undefined): string {
 // ─────────────────────────────────────────────
 
 function MiniBrandIcon({ prefix }: { prefix?: string }) {
-  const Icon = prefix ? getProviderIcon(prefix) : null;
+  const Icon = useMemo(() => prefix ? getProviderIcon(prefix) : null, [prefix]);
   if (Icon) {
     return (
       <div className="flex items-center justify-center rounded shrink-0 bg-muted/50 border h-6 w-6">
-        <Icon className="h-4 w-4" />
+        <Icon size={16} />
       </div>
     );
   }
@@ -153,7 +153,7 @@ function StatCard({
   hint,
   accent = "default",
 }: {
-  icon: React.ElementType;
+  icon: ElementType;
   label: string;
   value: string | number;
   hint?: string;
@@ -182,30 +182,6 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-// ─────────────────────────────────────────────
-//  Loading Skeleton
-// ─────────────────────────────────────────────
-
-function HealthSkeleton() {
-  return (
-    <div className="space-y-6 animate-pulse">
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <div className="h-8 w-44 bg-muted rounded" />
-          <div className="h-4 w-64 bg-muted rounded" />
-        </div>
-        <div className="h-9 w-28 bg-muted rounded" />
-      </div>
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-        {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-20 bg-muted rounded-lg" />
-        ))}
-      </div>
-      <div className="h-96 bg-muted rounded-lg" />
-    </div>
   );
 }
 
@@ -402,29 +378,44 @@ const CACHE_KEY = "wrouter:health-page-cache";
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 export default function HealthCheckPage() {
-  const [results, setResults] = useState<HealthResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [initialLoad, setInitialLoad] = useState(true);
-  const [lastChecked, setLastChecked] = useState<Date | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [selectedResult, setSelectedResult] = useState<HealthResult | null>(null);
-
-  // Load cached results on mount (no auto-check to avoid request spam)
-  useEffect(() => {
+  const [results, setResults] = useState<HealthResult[]>(() => {
     try {
       const cached = localStorage.getItem(CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed.checkedAt && Date.now() - parsed.checkedAt < CACHE_TTL) {
-          setResults(parsed.results || []);
-          setLastChecked(new Date(parsed.checkedAt));
+          return parsed.results || [];
         }
       }
     } catch {
       /* ignore */
     }
-    setInitialLoad(false);
+    return [];
+  });
+  const [loading, setLoading] = useState(false);
+  const [lastChecked, setLastChecked] = useState<Date | null>(() => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.checkedAt && Date.now() - parsed.checkedAt < CACHE_TTL) {
+          return new Date(parsed.checkedAt);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return null;
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [selectedResult, setSelectedResult] = useState<HealthResult | null>(null);
+
+  // Time state for staleness checks (avoids calling Date.now() during render)
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
   }, []);
 
   const runCheck = useCallback(async () => {
@@ -531,10 +522,8 @@ export default function HealthCheckPage() {
     toast.success(`Exported ${filtered.length} providers`);
   }
 
-  if (initialLoad) return <HealthSkeleton />;
-
   const hasResults = results.length > 0;
-  const cacheStale = lastChecked && Date.now() - lastChecked.getTime() > 5 * 60 * 1000;
+  const cacheStale = lastChecked ? now - lastChecked.getTime() > 5 * 60 * 1000 : false;
 
   return (
     <div className="space-y-6">

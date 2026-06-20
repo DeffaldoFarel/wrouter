@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { verifySession, hashPassword, checkDashboardAuth } from "@/lib/auth/session";
+import { hashPassword, checkDashboardAuth } from "@/lib/auth/session";
 
 export async function GET(req: NextRequest) {
   if (!checkDashboardAuth(req)) {

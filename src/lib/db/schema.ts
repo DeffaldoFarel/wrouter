@@ -6,7 +6,9 @@ export const providers = sqliteTable("providers", {
   name: text("name").notNull(),
   prefix: text("prefix").notNull().unique(),
   baseUrl: text("base_url").notNull(),
-  apiKey: text("api_key").notNull(),
+  // Single API key (kept for backward compat with single-key providers).
+  // New multi-key providers store keys in provider_connections table instead.
+  apiKey: text("api_key"),
   models: text("models").notNull().default("[]"), // JSON array of model strings
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
   // "custom" = direct OpenAI-compatible provider (manual model list)
@@ -17,6 +19,11 @@ export const providers = sqliteTable("providers", {
   //   "anthropic" → Anthropic native        (POST /v1/messages, x-api-key header)
   //   "gemini"    → Google Gemini native    (POST /v1beta/models/.../generateContent) — reserved
   format: text("format").notNull().default("openai"),
+  // Connection strategy for multi-key support (inspired by GenflowAi/9router)
+  //   "priority"  → pick highest priority key among available ones (default)
+  //   "round-robin" → cycle through keys evenly
+  //   "random"    → pick a random available key
+  connectionStrategy: text("connection_strategy").notNull().default("priority"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -55,6 +62,8 @@ export const requestLogs = sqliteTable("request_logs", {
   latencyMs: integer("latency_ms"),
   status: text("status").notNull(), // success | error | fallback
   isStreaming: integer("is_streaming", { mode: "boolean" }).notNull().default(false),
+  // Estimated cost in USD (calculated by in-code pricing engine)
+  costUsd: text("cost_usd"),
   error: text("error"),
   requestDetail: text("request_detail"), // JSON: full request body
   responseDetail: text("response_detail"), // JSON: full response body from provider
@@ -81,3 +90,57 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+// ─── Provider Connections (OAuth accounts & multiple API keys) ───
+// Stores OAuth tokens and API keys for each connected account.
+// The `data` column is a JSON blob containing all sensitive/dynamic fields:
+//   accessToken, refreshToken, expiresAt, expiresIn, tokenType, scope,
+//   idToken, lastRefreshAt, projectId, apiKey, testStatus, lastError,
+//   lastErrorAt, rateLimitedUntil, errorCode, consecutiveUseCount,
+//   providerSpecificData (nested JSON for provider-specific fields).
+//
+// Design inspired by GenflowAi/9router: hybrid storage — high-level queryable fields
+// are first-class columns, all OAuth/dynamic fields packed into JSON `data`.
+export const providerConnections = sqliteTable(
+  "provider_connections",
+  {
+    id: text("id").primaryKey(),
+    // FK to providers table — enables multi-key per provider
+    providerId: text("provider_id").references(() => providers.id),
+    // Provider type: "claude" | "codex" | "github" | "cursor" | "kiro" | "openai" | "anthropic" | "gemini" | ...
+    // Used for OAuth connections (when providerId is null for non-provider-specific accounts)
+    provider: text("provider"),
+    // Auth method: "oauth" | "apikey" | "access_token" | "cookie"
+    authType: text("auth_type").notNull(),
+    name: text("name"),
+    email: text("email"),
+    // Failover ordering within a provider (1 = highest priority)
+    priority: integer("priority"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    // ─── Error tracking & rate limiting (multi-key failover) ───
+    errorCount: integer("error_count").notNull().default(0),
+    // HTTP error code that caused the last failure (401, 429, 500, etc.)
+    lastErrorCode: text("last_error_code"),
+    lastErrorAt: text("last_error_at"),
+    // Rate limit: max requests within the window
+    rateLimit: integer("rate_limit"),
+    rateLimitWindow: integer("rate_limit_window"), // in seconds
+    currentUsage: integer("current_usage").notNull().default(0),
+    lastUsedAt: text("last_used_at"),
+    // When set, this connection is skipped until the timestamp passes
+    rateLimitedUntil: text("rate_limited_until"),
+    // Auto-disable after this many consecutive errors (default 5)
+    maxErrors: integer("max_errors").notNull().default(5),
+    // JSON blob with all sensitive/dynamic fields
+    data: text("data").notNull().default("{}"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    providerIdx: index("pc_provider_idx").on(table.provider),
+    providerIdIdx: index("pc_provider_id_idx").on(table.providerId),
+    providerActiveIdx: index("pc_provider_active_idx").on(table.provider, table.isActive),
+    providerIdActiveIdx: index("pc_provider_id_active_idx").on(table.providerId, table.isActive),
+    priorityIdx: index("pc_priority_idx").on(table.priority),
+  })
+);

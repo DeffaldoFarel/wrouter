@@ -27,7 +27,6 @@ import {
   ArrowDown,
   X,
   GripVertical,
-  Activity,
   Box,
   Workflow,
   CheckCircle2,
@@ -36,7 +35,11 @@ import {
   AlertCircle,
   XCircle,
 } from "lucide-react";
-import { getProviderIcon } from "@/components/provider-icons";
+import Link from "next/link";
+import {
+  ProviderIcon,
+  KNOWN_ICON_PREFIXES,
+} from "@/components/provider-icons";
 
 interface Provider {
   id: string;
@@ -66,14 +69,15 @@ interface Combo {
 // ─────────────────────────────────────────────
 
 function BrandIcon({ prefix, size = "sm" }: { prefix?: string; size?: "xs" | "sm" }) {
-  const Icon = prefix ? getProviderIcon(prefix) : null;
-  const dimensions = size === "xs" ? "h-4 w-4" : "h-5 w-5";
   const box = size === "xs" ? "h-5 w-5" : "h-6 w-6";
+  const iconSize = size === "xs" ? 16 : 20;
 
-  if (Icon) {
+  const hasIcon = prefix ? KNOWN_ICON_PREFIXES.has(prefix) : false;
+
+  if (hasIcon) {
     return (
       <div className={`flex items-center justify-center rounded shrink-0 bg-muted/50 border ${box}`}>
-        <Icon className={dimensions} />
+        <ProviderIcon prefix={prefix} size={iconSize} />
       </div>
     );
   }
@@ -307,7 +311,7 @@ export default function CombosPage() {
   // Drag state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const refetch = useCallback(async () => {
     try {
       const [combosRes, providersRes] = await Promise.all([
         fetch("/api/combos"),
@@ -317,14 +321,28 @@ export default function CombosPage() {
       if (providersRes.ok) setProviders(await providersRes.json());
     } catch {
       toast.error("Failed to fetch data");
-    } finally {
-      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [combosRes, providersRes] = await Promise.all([
+          fetch("/api/combos"),
+          fetch("/api/providers"),
+        ]);
+        if (cancelled) return;
+        if (combosRes.ok) setCombos(await combosRes.json());
+        if (providersRes.ok) setProviders(await providersRes.json());
+      } catch {
+        if (!cancelled) toast.error("Failed to fetch data");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   function resetForm() {
     setName("");
@@ -446,7 +464,7 @@ export default function CombosPage() {
       }
       setDialogOpen(false);
       resetForm();
-      fetchData();
+      refetch();
     } catch {
       toast.error("Connection error");
     }
@@ -472,7 +490,7 @@ export default function CombosPage() {
       const res = await fetch(`/api/combos/${deleteTarget.id}`, { method: "DELETE" });
       if (res.ok) {
         toast.success("Combo deleted");
-        fetchData();
+        refetch();
       } else {
         toast.error("Failed to delete combo");
       }
@@ -889,12 +907,12 @@ export default function CombosPage() {
                 <p className="text-sm font-medium">No active providers</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   You need at least one active provider with models to create combos.{" "}
-                  <a
+                  <Link
                     href="/dashboard/providers"
                     className="text-primary hover:underline font-medium"
                   >
                     Manage providers →
-                  </a>
+                  </Link>
                 </p>
               </div>
             </div>

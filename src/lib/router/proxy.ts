@@ -1,4 +1,5 @@
-import { RoutingResult, getFallbackChain, logRequest, incrementActiveJobs, decrementActiveJobs, notifyRequestStart } from "./engine";
+import { RoutingResult, logRequest, incrementActiveJobs, decrementActiveJobs, notifyRequestStart } from "./engine";
+import { recordError } from "../key-picker";
 import { estimateInputTokens, estimateOutputTokens, MessageLike } from "./token-estimator";
 import { extractUsage, hasMeaningfulUsage, NormalizedUsage } from "./usage-extractor";
 import { openaiToAnthropicRequest, anthropicToOpenaiResponse, translateAnthropicStream } from "./translator/anthropic";
@@ -210,6 +211,11 @@ export async function proxyWithFallback(
       const errorText = await response.text();
       lastError = new Error(`Provider ${target.providerName} returned ${response.status}: ${errorText}`);
 
+      // Track error for multi-key failover
+      if (target.connectionId) {
+        recordError(target.connectionId, response.status);
+      }
+
       logRequest({
         model: target.model,
         providerId: target.providerId,
@@ -233,6 +239,11 @@ export async function proxyWithFallback(
     } catch (err) {
       const latencyMs = Date.now() - startTime;
       lastError = err instanceof Error ? err : new Error(String(err));
+
+      // Track error for multi-key failover (network error = 500 equivalent)
+      if (target.connectionId) {
+        recordError(target.connectionId, 500);
+      }
 
       logRequest({
         model: target.model,
@@ -402,6 +413,12 @@ export async function proxyStreamWithFallback(
         const errorText = await response.text();
         lastError = new Error(`Provider ${target.providerName} returned ${response.status}: ${errorText}`);
         const latencyMs = Date.now() - startTime;
+
+        // Track error for multi-key failover
+        if (target.connectionId) {
+          recordError(target.connectionId, response.status);
+        }
+
         logRequest({
           model: target.model,
           providerId: target.providerId,
@@ -429,7 +446,7 @@ export async function proxyStreamWithFallback(
         throw new Error("No response body for streaming");
       }
 
-      const timeToFirstByte = Date.now() - startTime;
+      const _timeToFirstByte = Date.now() - startTime;
 
       // Tap the stream to extract token usage from the final SSE chunk.
       // Many providers (OpenRouter, DeepSeek, etc.) send usage in the final

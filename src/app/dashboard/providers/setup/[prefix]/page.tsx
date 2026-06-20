@@ -36,9 +36,8 @@ function BrandIcon({ provider }: { provider: KnownApiKeyProvider }) {
     return (
       <div
         className="flex items-center justify-center rounded-lg shrink-0 bg-muted/50 border h-12 w-12"
-        style={provider.brandColor ? { color: provider.brandColor } : undefined}
       >
-        <Icon className="h-7 w-7" />
+        <Icon size={28} />
       </div>
     );
   }

@@ -142,7 +142,7 @@ function ProviderNode({
           {/* Brand icon or fallback */}
           {Icon ? (
             <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-muted/50 border shrink-0">
-              <Icon className="h-7 w-7" />
+              <Icon size={28} />
             </div>
           ) : (
             <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-muted shrink-0">

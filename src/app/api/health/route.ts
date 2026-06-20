@@ -45,6 +45,19 @@ export async function GET(req: NextRequest) {
       }
 
       try {
+        if (!p.apiKey) {
+          // No API key — skip health check
+          return {
+            id: p.id,
+            name: p.name,
+            prefix: p.prefix,
+            type: p.type,
+            enabled: true,
+            status: "no-key" as const,
+            latencyMs: null,
+            error: "No API key configured",
+          };
+        }
         const res = await fetch(`${p.baseUrl}/models`, {
           method: "GET",
           headers: {
