@@ -48,5 +48,27 @@ export const KNOWN_API_KEY_PROVIDERS: KnownApiKeyProvider[] = [
     brandColor: "#4285f4",
     iconLabel: "AI",
   },
+  {
+    name: "Anthropic",
+    prefix: "anthropic",
+    baseUrl: "https://api.anthropic.com",
+    description: "Claude models (Opus 4, Sonnet 4, Haiku 3.5) — native API with thinking mode",
+    docsUrl: "https://console.anthropic.com/settings/keys",
+    keyPlaceholder: "sk-ant-...",
+    keyHint: "console.anthropic.com",
+    brandColor: "#d97706",
+    iconLabel: "AP",
+  },
+  {
+    name: "OpenAI",
+    prefix: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    description: "GPT-5, GPT-4o, o3, o4-mini — official OpenAI API",
+    docsUrl: "https://platform.openai.com/api-keys",
+    keyPlaceholder: "sk-proj-...",
+    keyHint: "platform.openai.com",
+    brandColor: "#10a37f",
+    iconLabel: "OA",
+  },
   // Add more API Key Providers here as needed
 ];
