@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requestLogs, providers, apiKeys, combos, settings } from "@/lib/db/schema";
+import { requestLogs, providers, apiKeys, combos, settings, providerConnections } from "@/lib/db/schema";
 import { checkDashboardAuth } from "@/lib/auth/session";
 import { ne, eq } from "drizzle-orm";
 import { resetLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
@@ -30,7 +30,9 @@ export async function POST(req: NextRequest) {
 
   if (type === "full") {
     // Delete everything except the admin password setting
+    // Order matters: delete child tables first (FK constraints)
     db.delete(requestLogs).run();
+    db.delete(providerConnections).run();
     db.delete(providers).run();
     db.delete(apiKeys).run();
     db.delete(combos).run();

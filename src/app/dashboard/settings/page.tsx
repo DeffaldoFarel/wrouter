@@ -210,6 +210,7 @@ export default function SettingsPage() {
 
   // Backup
   const [backupLoading, setBackupLoading] = useState(false);
+  const [slimBackupLoading, setSlimBackupLoading] = useState(false);
 
   // Reset
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -321,6 +322,34 @@ export default function SettingsPage() {
       toast.error("Backup failed");
     } finally {
       setBackupLoading(false);
+    }
+  }
+
+  async function downloadSlimBackup() {
+    setSlimBackupLoading(true);
+    try {
+      const res = await fetch("/api/backup?slim=true");
+      if (!res.ok) {
+        toast.error("Failed to create slim backup");
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition");
+      const fileName =
+        disposition?.match(/filename="(.+)"/)?.[1] || "wrouter-slim-backup.db";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Slim backup downloaded");
+    } catch {
+      toast.error("Slim backup failed");
+    } finally {
+      setSlimBackupLoading(false);
     }
   }
 
@@ -882,6 +911,38 @@ export default function SettingsPage() {
                   <>
                     <Download className="h-3.5 w-3.5 mr-1" />
                     Download Backup
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {/* Slim Backup */}
+            <div className="rounded-md border p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="rounded-md bg-amber-500/10 p-2">
+                  <Database className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Slim Backup (No Logs)</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Export providers, API keys, combos & settings only. Much smaller file — excludes request_logs (usually 90%+ of DB size)
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                onClick={downloadSlimBackup}
+                disabled={slimBackupLoading}
+              >
+                {slimBackupLoading ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    Creating slim backup...
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3.5 w-3.5 mr-1" />
+                    Download Slim Backup
                   </>
                 )}
               </Button>

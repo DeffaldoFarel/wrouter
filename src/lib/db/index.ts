@@ -230,10 +230,11 @@ export function initializeDatabase() {
 
   // Migration: migrate existing providers.apiKey to provider_connections (multi-key support)
   // For each provider that has an api_key but no provider_connections entry, create one.
+  // Note: providers.api_key is already encrypted, so we copy it as-is into data JSON.
   try {
     const providersWithKey = sqlite.prepare(
-      `SELECT id, api_key FROM providers WHERE api_key IS NOT NULL AND api_key != ''`
-    ).all() as Array<{ id: string; api_key: string }>;
+      `SELECT id, prefix, api_key FROM providers WHERE api_key IS NOT NULL AND api_key != ''`
+    ).all() as Array<{ id: string; prefix: string; api_key: string }>;
 
     for (const p of providersWithKey) {
       const hasConn = sqlite.prepare(
@@ -242,13 +243,12 @@ export function initializeDatabase() {
 
       if (!hasConn) {
         const now = new Date().toISOString();
-        const connId = `conn-${Date.now()}-${p.id.slice(0, 8)}`;
-        // Store encrypted key in data JSON (same format as createApiKeyConnection)
-        const { encrypt } = require("@/lib/crypto");
+        const connId = `conn-mig-${Date.now()}-${p.id.slice(0, 8)}`;
+        // Key is already encrypted in providers.api_key — copy as-is
         sqlite.prepare(
-          `INSERT INTO provider_connections (id, provider_id, auth_type, name, priority, is_active, data, max_errors, current_usage, error_count, created_at, updated_at)
-           VALUES (?, ?, 'apikey', 'Primary Key (migrated)', 0, 1, ?, 5, 0, 0, ?, ?)`
-        ).run(connId, p.id, JSON.stringify({ apiKey: p.api_key }), now, now);
+          `INSERT INTO provider_connections (id, provider_id, provider, auth_type, name, priority, is_active, data, max_errors, current_usage, error_count, created_at, updated_at)
+           VALUES (?, ?, ?, 'apikey', 'Primary Key (migrated)', 0, 1, ?, 5, 0, 0, ?, ?)`
+        ).run(connId, p.id, p.prefix, JSON.stringify({ apiKey: p.api_key }), now, now);
       }
     }
   } catch (e) {

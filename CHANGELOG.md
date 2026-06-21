@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.6.1] - 2026-06-21
+
+### 🐛 Bug Fixes
+- **API Key Migration** — Auto-migrate existing `providers.apiKey` to `provider_connections` on app start (fixes old keys not showing in detail page)
+- **API Key Provider Matching** — Match old providers by `baseUrl` fallback, not just `type=apikey` (fixes pre-multi-key providers showing as "Not set up")
+- **Custom Provider API Key** — Auto-create `provider_connections` entry when custom provider is created/updated with API key
+- **Factory Reset** — Delete `provider_connections` before `providers` to fix FK constraint failure
+- **Backup Large Files** — Stream backup file instead of loading into memory (fixes crash on 1GB+ databases)
+
+### ✨ New Features
+- **Slim Backup** — Download backup without `request_logs` (98% smaller — 1.2GB → ~20MB)
+- **Global API Key Migration** — Migrate ALL providers with `api_key` to multi-key system (not just specific providers)
+
+---
+
 All notable changes to WRouter will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
