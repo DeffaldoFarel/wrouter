@@ -132,9 +132,16 @@ export function initializeDatabase() {
     // ignore
   }
 
-  // Mark known aggregators (OpenRouter-style: baseUrl contains openrouter.ai)
+  // Mark known API key providers (aggregators with model catalog API)
+  // This handles migration from old single-key version (type='custom') to multi-key version (type='apikey')
   try {
     sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%openrouter.ai%' AND type='custom'`);
+    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%api.deepseek.com%' AND type='custom'`);
+    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%generativelanguage.googleapis.com%' AND type='custom'`);
+    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%api.anthropic.com%' AND type='custom'`);
+    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%api.openai.com%' AND type='custom'`);
+    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%xiaomimimo.com%' AND type='custom'`);
+    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%dashscope%' AND type='custom'`);
   } catch {
     // ignore
   }

@@ -1168,7 +1168,10 @@ export default function ProvidersPage() {
           <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {filteredKnown.map((known) => {
               const connected =
-                providers.find((p) => p.name === known.name && p.type === "apikey") ?? null;
+                providers.find((p) =>
+                  (p.name === known.name && p.type === "apikey") ||
+                  p.baseUrl === known.baseUrl
+                ) ?? null;
               return (
                 <ApiKeyProviderSlot
                   key={known.prefix}
