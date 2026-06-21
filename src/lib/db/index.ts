@@ -228,6 +228,33 @@ export function initializeDatabase() {
     // Column already exists, ignore
   }
 
+  // Migration: migrate existing providers.apiKey to provider_connections (multi-key support)
+  // For each provider that has an api_key but no provider_connections entry, create one.
+  try {
+    const providersWithKey = sqlite.prepare(
+      `SELECT id, api_key FROM providers WHERE api_key IS NOT NULL AND api_key != ''`
+    ).all() as Array<{ id: string; api_key: string }>;
+
+    for (const p of providersWithKey) {
+      const hasConn = sqlite.prepare(
+        `SELECT id FROM provider_connections WHERE provider_id = ? AND auth_type = 'apikey'`
+      ).get(p.id);
+
+      if (!hasConn) {
+        const now = new Date().toISOString();
+        const connId = `conn-${Date.now()}-${p.id.slice(0, 8)}`;
+        // Store encrypted key in data JSON (same format as createApiKeyConnection)
+        const { encrypt } = require("@/lib/crypto");
+        sqlite.prepare(
+          `INSERT INTO provider_connections (id, provider_id, auth_type, name, priority, is_active, data, max_errors, current_usage, error_count, created_at, updated_at)
+           VALUES (?, ?, 'apikey', 'Primary Key (migrated)', 0, 1, ?, 5, 0, 0, ?, ?)`
+        ).run(connId, p.id, JSON.stringify({ apiKey: p.api_key }), now, now);
+      }
+    }
+  } catch (e) {
+    // ignore — may fail if table doesn't exist yet
+  }
+
   // Seed default settings if not exist
   const defaultSettings = [
     { key: "password", value: bcrypt.hashSync("qwertyui", 10) },

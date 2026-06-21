@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { providers } from "@/lib/db/schema";
+import { providers, providerConnections } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkDashboardAuth } from "@/lib/auth/session";
@@ -91,6 +91,25 @@ export async function POST(req: NextRequest) {
     };
 
     db.insert(providers).values(provider).run();
+
+    // Also create a provider_connections entry for the API key (multi-key support)
+    if (apiKey) {
+      db.insert(providerConnections).values({
+        id: uuidv4(),
+        providerId: provider.id,
+        authType: "apikey",
+        name: "Primary Key",
+        priority: 0,
+        isActive: true,
+        data: JSON.stringify({ apiKey: encrypt(apiKey) }),
+        maxErrors: 5,
+        currentUsage: 0,
+        errorCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+    }
+
     invalidateProviderCache();
 
     return NextResponse.json({

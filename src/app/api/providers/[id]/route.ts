@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { providers } from "@/lib/db/schema";
+import { providers, providerConnections } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { checkDashboardAuth } from "@/lib/auth/session";
 import { validateProviderUpdate } from "@/lib/validation";
 import { encrypt, isEncrypted, safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
 import { invalidateProviderCache } from "@/lib/router/engine";
+import { v4 as uuidv4 } from "uuid";
 
 export async function GET(
   req: NextRequest,
@@ -115,6 +116,45 @@ export async function PUT(
   };
 
   db.update(providers).set(updated).where(eq(providers.id, id)).run();
+
+  // Sync API key to provider_connections (multi-key support)
+  if (apiKey) {
+    const existingConn = db
+      .select()
+      .from(providerConnections)
+      .where(and(eq(providerConnections.providerId, id), eq(providerConnections.authType, "apikey")))
+      .get();
+
+    const encryptedKey = isEncrypted(apiKey) ? apiKey : encrypt(apiKey);
+
+    if (existingConn) {
+      // Update existing connection
+      db.update(providerConnections)
+        .set({
+          data: JSON.stringify({ apiKey: encryptedKey }),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(providerConnections.id, existingConn.id))
+        .run();
+    } else {
+      // Create new connection
+      db.insert(providerConnections).values({
+        id: uuidv4(),
+        providerId: id,
+        authType: "apikey",
+        name: "Primary Key",
+        priority: 0,
+        isActive: true,
+        data: JSON.stringify({ apiKey: encryptedKey }),
+        maxErrors: 5,
+        currentUsage: 0,
+        errorCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+    }
+  }
+
   invalidateProviderCache();
 
   return NextResponse.json({
