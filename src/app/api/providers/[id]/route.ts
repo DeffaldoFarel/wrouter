@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { providers, providerConnections } from "@/lib/db/schema";
+import { providers, providerConnections, requestLogs } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { checkDashboardAuth } from "@/lib/auth/session";
 import { validateProviderUpdate } from "@/lib/validation";
 import { encrypt, isEncrypted, safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
 import { invalidateProviderCache } from "@/lib/router/engine";
+import { maskApiKey } from "@/lib/utils/mask-key";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET(
@@ -141,6 +142,7 @@ export async function PUT(
       db.insert(providerConnections).values({
         id: uuidv4(),
         providerId: id,
+        provider: existing.prefix,
         authType: "apikey",
         name: "Primary Key",
         priority: 0,
@@ -179,13 +181,14 @@ export async function DELETE(
     return NextResponse.json({ error: "Provider not found" }, { status: 404 });
   }
 
-  db.delete(providers).where(eq(providers.id, id)).run();
+  // Delete child records first (FK constraint)
+    db.delete(providerConnections).where(eq(providerConnections.providerId, id)).run();
+    // Preserve audit trail: set provider_id NULL on existing request logs (don't delete history)
+    db.update(requestLogs).set({ providerId: null }).where(eq(requestLogs.providerId, id)).run();
+    db.delete(providers).where(eq(providers.id, id)).run();
   invalidateProviderCache();
 
   return NextResponse.json({ success: true });
 }
 
-function maskApiKey(key: string): string {
-  if (key.length <= 8) return "****";
-  return key.slice(0, 4) + "****" + key.slice(-4);
-}
+

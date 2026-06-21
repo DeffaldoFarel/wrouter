@@ -2,11 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requestLogs, apiKeys, providers } from "@/lib/db/schema";
 import { desc, sql, eq } from "drizzle-orm";
-import { verifySession } from "@/lib/auth/session";
+import { checkDashboardAuth } from "@/lib/auth/session";
 
 function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
+  return checkDashboardAuth(req) !== null;
 }
 
 export async function GET(req: NextRequest) {
@@ -15,7 +14,7 @@ export async function GET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const limit = parseInt(url.searchParams.get("limit") || "50");
+  const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "50") || 50, 1), 200);
   const offset = parseInt(url.searchParams.get("offset") || "0");
   const id = url.searchParams.get("id"); // Fetch single log with details
 

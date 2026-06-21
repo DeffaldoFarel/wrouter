@@ -244,6 +244,7 @@ function ComboCard({
           <Button
             size="sm"
             variant="ghost"
+            aria-label="Delete combo"
             className="text-destructive hover:text-destructive hover:bg-destructive/10"
             onClick={() => onDelete(combo)}
           >
@@ -472,11 +473,16 @@ export default function CombosPage() {
 
   async function toggleCombo(id: string, enabled: boolean) {
     try {
-      await fetch(`/api/combos/${id}`, {
+      const res = await fetch(`/api/combos/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to update combo");
+        return;
+      }
       setCombos((prev) => prev.map((c) => (c.id === id ? { ...c, enabled } : c)));
       toast.success(enabled ? "Combo enabled" : "Combo disabled");
     } catch {

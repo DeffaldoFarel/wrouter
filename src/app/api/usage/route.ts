@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requestLogs, providers, apiKeys } from "@/lib/db/schema";
-import { gte } from "drizzle-orm";
-import { verifySession } from "@/lib/auth/session";
+import { sql, gte, and, isNotNull } from "drizzle-orm";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import { getActiveJobs } from "@/lib/router/engine";
 import { maybeCleanupLogs } from "@/lib/log-retention";
 
 function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
+  return checkDashboardAuth(req) !== null;
 }
 
 function getStartDate(filter: string): Date {
@@ -40,29 +39,11 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter") || "24h";
   const startDate = getStartDate(filter);
+  const startISO = startDate.toISOString();
   const now = new Date();
   const hourly = USE_HOURLY.has(filter);
 
-  // --- Fetch only the columns needed for aggregation (skip large JSON columns) ---
-  const logs = db
-    .select({
-      id: requestLogs.id,
-      timestamp: requestLogs.timestamp,
-      model: requestLogs.model,
-      providerId: requestLogs.providerId,
-      comboId: requestLogs.comboId,
-      apiKeyId: requestLogs.apiKeyId,
-      tokensIn: requestLogs.tokensIn,
-      tokensOut: requestLogs.tokensOut,
-      latencyMs: requestLogs.latencyMs,
-      status: requestLogs.status,
-      isStreaming: requestLogs.isStreaming,
-      error: requestLogs.error,
-    })
-    .from(requestLogs)
-    .where(gte(requestLogs.timestamp, startDate.toISOString()))
-    .all();
-
+  // ─── Reference data (small dimension tables) ───
   const providerList = db.select().from(providers).all();
   const providerMap: Record<string, string> = {};
   for (const p of providerList) providerMap[p.id] = p.name;
@@ -71,7 +52,66 @@ export async function GET(req: NextRequest) {
   const apiKeyMap: Record<string, string> = {};
   for (const k of apiKeyList) apiKeyMap[k.id] = k.name;
 
-  // --- Build time buckets ---
+  // ═══════════════════════════════════════════════════════
+  //  All aggregation pushed to SQL (uses timestamp_idx).
+  //  Previously this route loaded every row in the window into
+  //  Node and ran multiple O(N) loops; at production scale that
+  //  meant transferring thousands of rows per dashboard load.
+  // ═══════════════════════════════════════════════════════
+
+  // ─── Summary (single GROUP-less aggregate) ───
+  const summaryRow = db
+    .select({
+      totalRequests:        sql<number>`COUNT(*)`,
+      totalErrors:          sql<number>`COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0)`,
+      totalTokensIn:        sql<number>`COALESCE(SUM(tokens_in), 0)`,
+      totalTokensOut:       sql<number>`COALESCE(SUM(tokens_out), 0)`,
+      // AVG ignores NULLs natively; original JS filtered out 0/null latencies, so wrap in NULLIF.
+      avgLatencyRaw:        sql<number | null>`AVG(NULLIF(latency_ms, 0))`,
+      streamingRequests:    sql<number>`COALESCE(SUM(CASE WHEN is_streaming = 1 THEN 1 ELSE 0 END), 0)`,
+      nonStreamingRequests: sql<number>`COALESCE(SUM(CASE WHEN is_streaming = 0 THEN 1 ELSE 0 END), 0)`,
+    })
+    .from(requestLogs)
+    .where(gte(requestLogs.timestamp, startISO))
+    .get();
+
+  const totalRequests        = summaryRow?.totalRequests ?? 0;
+  const totalErrors          = summaryRow?.totalErrors ?? 0;
+  const totalTokensIn        = summaryRow?.totalTokensIn ?? 0;
+  const totalTokensOut       = summaryRow?.totalTokensOut ?? 0;
+  const avgLatency           = summaryRow?.avgLatencyRaw != null ? Math.round(summaryRow.avgLatencyRaw) : 0;
+  const streamingRequests    = summaryRow?.streamingRequests ?? 0;
+  const nonStreamingRequests = summaryRow?.nonStreamingRequests ?? 0;
+
+  // ─── Time buckets via GROUP BY SUBSTR(timestamp, ...) ───
+  // ISO timestamps slice cleanly: 13 chars = "YYYY-MM-DDTHH", 10 chars = "YYYY-MM-DD".
+  const bucketRows = hourly
+    ? db
+        .select({
+          bucket:    sql<string>`SUBSTR(timestamp, 1, 13)`,
+          requests:  sql<number>`COUNT(*)`,
+          errors:    sql<number>`COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0)`,
+          tokensIn:  sql<number>`COALESCE(SUM(tokens_in), 0)`,
+          tokensOut: sql<number>`COALESCE(SUM(tokens_out), 0)`,
+        })
+        .from(requestLogs)
+        .where(gte(requestLogs.timestamp, startISO))
+        .groupBy(sql`SUBSTR(timestamp, 1, 13)`)
+        .all()
+    : db
+        .select({
+          bucket:    sql<string>`SUBSTR(timestamp, 1, 10)`,
+          requests:  sql<number>`COUNT(*)`,
+          errors:    sql<number>`COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0)`,
+          tokensIn:  sql<number>`COALESCE(SUM(tokens_in), 0)`,
+          tokensOut: sql<number>`COALESCE(SUM(tokens_out), 0)`,
+        })
+        .from(requestLogs)
+        .where(gte(requestLogs.timestamp, startISO))
+        .groupBy(sql`SUBSTR(timestamp, 1, 10)`)
+        .all();
+
+  // Pre-fill empty buckets so the time series stays continuous (matches old behavior).
   const reqBuckets: Record<string, { hour?: string; date?: string; requests: number; errors: number }> = {};
   const tokBuckets: Record<string, { hour?: string; date?: string; tokensIn: number; tokensOut: number }> = {};
 
@@ -99,148 +139,162 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // --- Breakdown accumulators ---
-  const providerBreakdown: Record<string, {
-    providerId: string; name: string; requests: number;
-    tokensIn: number; tokensOut: number; errors: number; lastUsed: string | null;
-  }> = {};
+  for (const r of bucketRows) {
+    const key = r.bucket;
+    if (reqBuckets[key]) {
+      reqBuckets[key].requests = r.requests;
+      reqBuckets[key].errors = r.errors;
+    } else {
+      reqBuckets[key] = hourly
+        ? { hour: key, requests: r.requests, errors: r.errors }
+        : { date: key, requests: r.requests, errors: r.errors };
+    }
+    if (tokBuckets[key]) {
+      tokBuckets[key].tokensIn = r.tokensIn;
+      tokBuckets[key].tokensOut = r.tokensOut;
+    } else {
+      tokBuckets[key] = hourly
+        ? { hour: key, tokensIn: r.tokensIn, tokensOut: r.tokensOut }
+        : { date: key, tokensIn: r.tokensIn, tokensOut: r.tokensOut };
+    }
+  }
 
-  const keyBreakdown: Record<string, {
-    apiKeyId: string; name: string; requests: number;
-    tokensIn: number; tokensOut: number; errors: number; lastUsed: string | null;
-  }> = {};
+  // ─── Per-provider breakdown (uses provider_id_idx) ───
+  // COALESCE(provider_id, 'unknown') matches the old `pid = log.providerId || "unknown"` fallback.
+  const providerRows = db
+    .select({
+      providerId: sql<string>`COALESCE(provider_id, 'unknown')`,
+      requests:   sql<number>`COUNT(*)`,
+      tokensIn:   sql<number>`COALESCE(SUM(tokens_in), 0)`,
+      tokensOut:  sql<number>`COALESCE(SUM(tokens_out), 0)`,
+      errors:     sql<number>`COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0)`,
+      lastUsed:   sql<string | null>`MAX(timestamp)`,
+    })
+    .from(requestLogs)
+    .where(gte(requestLogs.timestamp, startISO))
+    .groupBy(sql`COALESCE(provider_id, 'unknown')`)
+    .all();
 
-  const modelBreakdown: Record<string, {
-    model: string; requests: number; tokensIn: number; tokensOut: number;
-    errors: number; providers: Set<string>; lastUsed: string | null;
-  }> = {};
+  const perProviderBreakdown = providerRows
+    .map((r) => ({
+      providerId: r.providerId,
+      name: providerMap[r.providerId] || r.providerId,
+      requests: r.requests,
+      tokensIn: r.tokensIn,
+      tokensOut: r.tokensOut,
+      errors: r.errors,
+      lastUsed: r.lastUsed,
+    }))
+    .sort((a, b) => b.requests - a.requests);
 
-  // --- Summary accumulators ---
-  let totalErrors = 0;
-  let totalTokensIn = 0;
-  let totalTokensOut = 0;
-  let totalLatency = 0;
-  let latencyCount = 0;
-  let streamingRequests = 0;
-  let nonStreamingRequests = 0;
+  // ─── Per-API-key breakdown (uses api_key_id_idx) ───
+  // Skip null api_key_id rows — original code only built entries when log.apiKeyId was truthy.
+  const keyRows = db
+    .select({
+      apiKeyId:  requestLogs.apiKeyId,
+      requests:  sql<number>`COUNT(*)`,
+      tokensIn:  sql<number>`COALESCE(SUM(tokens_in), 0)`,
+      tokensOut: sql<number>`COALESCE(SUM(tokens_out), 0)`,
+      errors:    sql<number>`COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0)`,
+      lastUsed:  sql<string | null>`MAX(timestamp)`,
+    })
+    .from(requestLogs)
+    .where(and(gte(requestLogs.timestamp, startISO), isNotNull(requestLogs.apiKeyId)))
+    .groupBy(requestLogs.apiKeyId)
+    .all();
 
-  // --- Normalize model name helper ---
+  const perApiKeyBreakdown = keyRows
+    .map((r) => {
+      const kid = r.apiKeyId as string;
+      return {
+        apiKeyId: kid,
+        name: apiKeyMap[kid] || `(deleted key ${kid.slice(0, 8)}…)`,
+        requests: r.requests,
+        tokensIn: r.tokensIn,
+        tokensOut: r.tokensOut,
+        errors: r.errors,
+        lastUsed: r.lastUsed,
+      };
+    })
+    .sort((a, b) => b.requests - a.requests);
+
+  // ─── Per-model breakdown ───
+  // Group by (model, providerId) in SQL so we can both aggregate counts AND track distinct
+  // provider IDs per (raw) model. Then in JS we normalize the raw "vendor/model" string
+  // to its short tail and merge entries that collapse onto the same name. The number of
+  // groups returned is bounded by O(unique-models * unique-providers), which is tiny
+  // compared to O(logs).
+  const modelRows = db
+    .select({
+      model:      requestLogs.model,
+      providerId: requestLogs.providerId,
+      requests:   sql<number>`COUNT(*)`,
+      tokensIn:   sql<number>`COALESCE(SUM(tokens_in), 0)`,
+      tokensOut:  sql<number>`COALESCE(SUM(tokens_out), 0)`,
+      errors:     sql<number>`COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0)`,
+      lastUsed:   sql<string | null>`MAX(timestamp)`,
+    })
+    .from(requestLogs)
+    .where(and(gte(requestLogs.timestamp, startISO), isNotNull(requestLogs.model)))
+    .groupBy(requestLogs.model, requestLogs.providerId)
+    .all();
+
   const normalizeModel = (raw: string): string => {
     const idx = raw.lastIndexOf("/");
     const normalized = idx >= 0 ? raw.slice(idx + 1) : raw;
     return normalized || raw;
   };
 
-  // --- Active providers tracking (last 5 seconds — client-side SSE tracking is primary) ---
-  const fiveSecondsAgo = new Date(now.getTime() - 5 * 1000).toISOString();
-  const activeProviderIds = new Set<string>();
+  const modelMap: Record<string, {
+    model: string; requests: number; tokensIn: number; tokensOut: number;
+    errors: number; providers: Set<string>; lastUsed: string | null;
+  }> = {};
 
-  // ═══════════════════════════════════════════════════════
-  //  SINGLE LOOP — process each log entry exactly once
-  // ═══════════════════════════════════════════════════════
-  for (const log of logs) {
-    const tokensIn = log.tokensIn || 0;
-    const tokensOut = log.tokensOut || 0;
-    const isError = log.status === "error";
-
-    // ── Summary ──
-    totalTokensIn += tokensIn;
-    totalTokensOut += tokensOut;
-    if (isError) totalErrors++;
-    if (log.latencyMs) {
-      totalLatency += log.latencyMs;
-      latencyCount++;
-    }
-    if (log.isStreaming) {
-      streamingRequests++;
-    } else {
-      nonStreamingRequests++;
-    }
-
-    // ── Time buckets ──
-    const bucketKey = hourly ? log.timestamp.slice(0, 13) : log.timestamp.slice(0, 10);
-    if (reqBuckets[bucketKey]) {
-      reqBuckets[bucketKey].requests++;
-      if (isError) reqBuckets[bucketKey].errors++;
-    }
-    if (tokBuckets[bucketKey]) {
-      tokBuckets[bucketKey].tokensIn += tokensIn;
-      tokBuckets[bucketKey].tokensOut += tokensOut;
-    }
-
-    // ── Per-provider breakdown ──
-    const pid = log.providerId || "unknown";
-    if (!providerBreakdown[pid]) {
-      providerBreakdown[pid] = {
-        providerId: pid, name: providerMap[pid] || pid,
-        requests: 0, tokensIn: 0, tokensOut: 0, errors: 0, lastUsed: null,
+  for (const r of modelRows) {
+    if (!r.model) continue;
+    const name = normalizeModel(r.model);
+    let m = modelMap[name];
+    if (!m) {
+      m = modelMap[name] = {
+        model: name, requests: 0, tokensIn: 0, tokensOut: 0,
+        errors: 0, providers: new Set(), lastUsed: null,
       };
     }
-    const pb = providerBreakdown[pid];
-    pb.requests++;
-    pb.tokensIn += tokensIn;
-    pb.tokensOut += tokensOut;
-    if (isError) pb.errors++;
-    if (!pb.lastUsed || log.timestamp > pb.lastUsed!) pb.lastUsed = log.timestamp;
-
-    // ── Track active providers (last 5 seconds — fallback for initial page load) ──
-    if (log.timestamp >= fiveSecondsAgo && log.providerId) {
-      activeProviderIds.add(log.providerId);
-    }
-
-    // ── Per-API-Key breakdown ──
-    if (log.apiKeyId) {
-      const kid = log.apiKeyId;
-      if (!keyBreakdown[kid]) {
-        const keyName = apiKeyMap[kid] || `(deleted key ${kid.slice(0, 8)}…)`;
-        keyBreakdown[kid] = {
-          apiKeyId: kid, name: keyName,
-          requests: 0, tokensIn: 0, tokensOut: 0, errors: 0, lastUsed: null,
-        };
-      }
-      const kb = keyBreakdown[kid];
-      kb.requests++;
-      kb.tokensIn += tokensIn;
-      kb.tokensOut += tokensOut;
-      if (isError) kb.errors++;
-      if (!kb.lastUsed || log.timestamp > kb.lastUsed!) kb.lastUsed = log.timestamp;
-    }
-
-    // ── Per-Model breakdown ──
-    if (log.model) {
-      const modelName = normalizeModel(log.model);
-      if (!modelBreakdown[modelName]) {
-        modelBreakdown[modelName] = {
-          model: modelName, requests: 0, tokensIn: 0, tokensOut: 0,
-          errors: 0, providers: new Set(), lastUsed: null,
-        };
-      }
-      const mb = modelBreakdown[modelName];
-      mb.requests++;
-      mb.tokensIn += tokensIn;
-      mb.tokensOut += tokensOut;
-      if (isError) mb.errors++;
-      if (log.providerId) mb.providers.add(log.providerId);
-      if (!mb.lastUsed || log.timestamp > mb.lastUsed!) mb.lastUsed = log.timestamp;
-    }
+    m.requests  += r.requests;
+    m.tokensIn  += r.tokensIn;
+    m.tokensOut += r.tokensOut;
+    m.errors    += r.errors;
+    if (r.providerId) m.providers.add(r.providerId);
+    if (r.lastUsed && (!m.lastUsed || r.lastUsed > m.lastUsed)) m.lastUsed = r.lastUsed;
   }
 
-  // --- Build sorted results ---
-  const requestsPerPeriod = Object.values(reqBuckets);
-  const tokenUsagePerPeriod = Object.values(tokBuckets);
-  const perProviderBreakdown = Object.values(providerBreakdown).sort((a, b) => b.requests - a.requests);
-  const perApiKeyBreakdown = Object.values(keyBreakdown).sort((a, b) => b.requests - a.requests);
-  const perModelBreakdown = Object.values(modelBreakdown)
-    .map(m => ({
-      model: m.model, requests: m.requests,
-      tokensIn: m.tokensIn, tokensOut: m.tokensOut,
-      errors: m.errors, providerCount: m.providers.size, lastUsed: m.lastUsed,
+  const perModelBreakdown = Object.values(modelMap)
+    .map((m) => ({
+      model: m.model,
+      requests: m.requests,
+      tokensIn: m.tokensIn,
+      tokensOut: m.tokensOut,
+      errors: m.errors,
+      providerCount: m.providers.size,
+      lastUsed: m.lastUsed,
     }))
     .sort((a, b) => b.requests - a.requests);
 
-  const avgLatency = latencyCount > 0 ? Math.round(totalLatency / latencyCount) : 0;
+  // ─── Active providers (last 5s) — DB-side fallback for initial page load ───
+  const fiveSecondsAgo = new Date(now.getTime() - 5 * 1000).toISOString();
+  const activeRows = db
+    .select({ providerId: requestLogs.providerId })
+    .from(requestLogs)
+    .where(and(gte(requestLogs.timestamp, fiveSecondsAgo), isNotNull(requestLogs.providerId)))
+    .groupBy(requestLogs.providerId)
+    .all();
+  const activeProviderIds = new Set(
+    activeRows.map((r) => r.providerId).filter((x): x is string => !!x),
+  );
 
-  // --- Canvas active providers ---
+  const requestsPerPeriod = Object.values(reqBuckets);
+  const tokenUsagePerPeriod = Object.values(tokBuckets);
+
   const canvasProviders = providerList.map((p) => ({
     id: p.id, name: p.name, enabled: p.enabled, active: activeProviderIds.has(p.id),
   }));
@@ -248,7 +302,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     filter,
     hourly,
-    summary: { totalRequests: logs.length, totalErrors, totalTokensIn, totalTokensOut, avgLatency, streamingRequests, nonStreamingRequests },
+    summary: { totalRequests, totalErrors, totalTokensIn, totalTokensOut, avgLatency, streamingRequests, nonStreamingRequests },
     requestsPerPeriod,
     tokenUsagePerPeriod,
     perProviderBreakdown,

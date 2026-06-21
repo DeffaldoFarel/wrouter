@@ -6,6 +6,8 @@ import {
 import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { checkDashboardAuth } from "@/lib/auth/session";
+import { validateProviderConnectionKey } from "@/lib/validation";
 
 /**
  * GET /api/providers/[id]/keys
@@ -15,6 +17,9 @@ export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  if (!checkDashboardAuth(_req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id } = await ctx.params;
   const stats = getConnectionStats(id);
   return NextResponse.json({ keys: stats });
@@ -28,6 +33,9 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  if (!checkDashboardAuth(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id } = await ctx.params;
 
   // Verify provider exists
@@ -37,11 +45,16 @@ export async function POST(
   }
 
   const body = await req.json();
-  const { name, apiKey, priority, maxErrors, rateLimit } = body;
 
-  if (!apiKey) {
-    return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
+  const validation = validateProviderConnectionKey(body);
+  if (!validation.valid) {
+    return NextResponse.json(
+      { error: "Validation failed", errors: validation.errors },
+      { status: 400 }
+    );
   }
+
+  const { name, apiKey, priority, maxErrors, rateLimit } = body;
 
   try {
     const connection = createApiKeyConnection({

@@ -4,11 +4,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAndRefreshToken } from "@/lib/oauth/token-refresh";
 import { getConnectionById } from "@/lib/oauth/connections";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import logger from "@/lib/logger";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function POST(_request: NextRequest, { params }: RouteParams) {
+  if (!checkDashboardAuth(_request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id } = await params;
 
   try {

@@ -34,72 +34,13 @@ import {
   Shield,
 } from "lucide-react";
 import { KNOWN_API_KEY_PROVIDERS, type KnownApiKeyProvider } from "@/lib/constants/providers";
+import {
+  KNOWN_OAUTH_PROVIDERS,
+  type KnownOAuthProvider,
+} from "@/lib/constants/oauth-providers";
 import { ProviderIcon, KNOWN_ICON_PREFIXES } from "@/components/provider-icons";
 import { OAuthConnectionManager } from "@/components/oauth-connection-manager";
 import { OAuthFlowModal } from "@/components/oauth-flow-modal";
-
-// ─────────────────────────────────────────────
-//  Known OAuth Providers
-// ─────────────────────────────────────────────
-interface KnownOAuthProvider {
-  id: string;
-  name: string;
-  prefix: string;
-  description: string;
-  brandColor: string;
-  iconLabel: string;
-}
-
-const KNOWN_OAUTH_PROVIDERS: KnownOAuthProvider[] = [
-  {
-    id: "claude",
-    name: "Claude Code",
-    prefix: "claude",
-    description: "Anthropic Claude via OAuth device code flow. Auto-refreshing tokens.",
-    brandColor: "#D97757",
-    iconLabel: "CL",
-  },
-  {
-    id: "codex",
-    name: "OpenAI Codex",
-    prefix: "codex",
-    description: "OpenAI Codex CLI via OAuth. Supports GPT and o-series models.",
-    brandColor: "#10A37F",
-    iconLabel: "OA",
-  },
-  {
-    id: "github",
-    name: "GitHub Copilot",
-    prefix: "github",
-    description: "GitHub Copilot OAuth connection. Access to Copilot models.",
-    brandColor: "#6e40c9",
-    iconLabel: "GH",
-  },
-  {
-    id: "cursor",
-    name: "Cursor",
-    prefix: "cursor",
-    description: "Cursor editor OAuth. Auto-refreshing access to Cursor models.",
-    brandColor: "#2563EB",
-    iconLabel: "CU",
-  },
-  {
-    id: "kiro",
-    name: "Kiro",
-    prefix: "kiro",
-    description: "AWS CodeWhisperer / Kiro via SSO OIDC device code flow.",
-    brandColor: "#FF9900",
-    iconLabel: "KI",
-  },
-  {
-    id: "gemini-cli",
-    name: "Gemini CLI",
-    prefix: "gemini-cli",
-    description: "Google Gemini via OAuth 2.0. Auto-discovers Cloud project.",
-    brandColor: "#4285F4",
-    iconLabel: "GE",
-  },
-];
 
 interface OAuthConnection {
   id: string;
@@ -570,7 +511,7 @@ export default function ProvidersPage() {
   const [prefix, setPrefix] = useState("");
   const [format, setFormat] = useState<"openai" | "anthropic">("openai");
   const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
+
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -666,7 +607,6 @@ export default function ProvidersPage() {
     setPrefix("");
     setFormat("openai");
     setBaseUrl("");
-    setApiKey("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -676,7 +616,7 @@ export default function ProvidersPage() {
       const res = await fetch("/api/providers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, prefix, baseUrl, apiKey, type: "custom", format }),
+        body: JSON.stringify({ name, prefix, baseUrl, type: "custom", format }),
       });
 
       if (res.ok) {
@@ -833,43 +773,7 @@ export default function ProvidersPage() {
                     id="baseUrl"
                     placeholder="https://api.example.com/v1"
                     value={baseUrl}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setBaseUrl(v);
-                      // Auto-detect format from URL
-                      if (v.includes("anthropic.com")) setFormat("anthropic");
-                      else if (v.length > 0 && format === "anthropic" && !v.includes("anthropic.com")) {
-                        setFormat("openai");
-                      }
-                    }}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="format">API Format</Label>
-                  <select
-                    id="format"
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
-                    value={format}
-                    onChange={(e) => setFormat(e.target.value as "openai" | "anthropic")}
-                  >
-                    <option value="openai">OpenAI-compatible (default)</option>
-                    <option value="anthropic">Anthropic native (/v1/messages)</option>
-                  </select>
-                  <p className="text-xs text-muted-foreground">
-                    {format === "anthropic"
-                      ? "Provider speaks Anthropic /v1/messages with x-api-key header. WRouter translates OpenAI ⇄ Anthropic transparently."
-                      : "Standard /v1/chat/completions with Bearer auth (OpenAI, DeepSeek, Genflow, OpenRouter, etc.)"}
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="apiKey">API Key</Label>
-                  <Input
-                    id="apiKey"
-                    type="password"
-                    placeholder="sk-..."
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
+                    onChange={(e) => setBaseUrl(e.target.value)}
                     required
                   />
                 </div>
@@ -1207,7 +1111,7 @@ export default function ProvidersPage() {
             </button>
           </p>
           <a
-            href="https://github.com/your-org/wrouter"
+            href="https://github.com/DeffaldoFarel/wrouter"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 hover:text-foreground"

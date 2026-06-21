@@ -8,6 +8,7 @@ import { validateUrl } from "@/lib/ssrf-guard";
 import { encrypt, safeDecryptApiKey } from "@/lib/crypto";
 import { validateProvider } from "@/lib/validation";
 import { invalidateProviderCache } from "@/lib/router/engine";
+import { maskApiKey } from "@/lib/utils/mask-key";
 
 export async function GET(req: NextRequest) {
   if (!checkDashboardAuth(req)) {
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
       name,
       prefix,
       baseUrl: baseUrl.replace(/\/$/, ""),
-      apiKey: encrypt(apiKey),
+      apiKey: apiKey ? encrypt(apiKey) : null,
       models: JSON.stringify([]),
       enabled: true,
       type,
@@ -97,6 +98,7 @@ export async function POST(req: NextRequest) {
       db.insert(providerConnections).values({
         id: uuidv4(),
         providerId: provider.id,
+        provider: prefix,
         authType: "apikey",
         name: "Primary Key",
         priority: 0,
@@ -115,17 +117,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ...provider,
       models: [],
-      apiKey: maskApiKey(apiKey),
+      apiKey: apiKey ? maskApiKey(apiKey) : null,
     }, { status: 201 });
-  } catch {
+  } catch (err) {
+    console.error("POST /api/providers error:", err);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
       { status: 500 }
     );
   }
 }
 
-function maskApiKey(key: string): string {
-  if (key.length <= 8) return "****";
-  return key.slice(0, 4) + "****" + key.slice(-4);
-}
+

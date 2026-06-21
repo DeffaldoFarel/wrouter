@@ -1,19 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { providers } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { verifySession } from "@/lib/auth/session";
+import { providers, providerConnections } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import { safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
+import { dashboardLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 
 function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
+  return checkDashboardAuth(req) !== null;
 }
 
 export async function POST(req: NextRequest) {
   if (!checkAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // F1: Rate limit outbound fetch (60/min/IP)
+  const ip = getClientIp(req);
+  const limitCheck = dashboardLimiter.consume(ip);
+  if (!limitCheck.allowed) {
+    return rateLimitResponse(limitCheck.retryAfter);
   }
 
   try {
@@ -27,6 +34,24 @@ export async function POST(req: NextRequest) {
     if (providerId) {
       const provider = db.select().from(providers).where(eq(providers.id, providerId)).get();
       if (provider) {
+        // Try provider_connections first (multi-key), fallback to legacy provider.apiKey
+        if (!resolvedApiKey) {
+          const conn = db.select().from(providerConnections)
+            .where(and(
+              eq(providerConnections.providerId, providerId),
+              eq(providerConnections.authType, "apikey"),
+              eq(providerConnections.isActive, true)
+            ))
+            .get();
+          if (conn?.data) {
+            try {
+              const data = JSON.parse(conn.data);
+              if (data.apiKey) resolvedApiKey = safeDecryptApiKey(data.apiKey);
+            } catch (e) {
+              console.warn("[fetch-models] Failed to parse connection data:", e);
+            }
+          }
+        }
         if (!resolvedApiKey && provider.apiKey) resolvedApiKey = safeDecryptApiKey(provider.apiKey);
         if (!resolvedBaseUrl) resolvedBaseUrl = provider.baseUrl;
         providerType = provider.type ?? "custom";

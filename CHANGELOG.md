@@ -1,5 +1,91 @@
 # Changelog
 
+## [1.7.0] - 2026-06-21
+
+### 🔒 Security Hardening (Major Release)
+
+**57 issues fixed across 7 audit phases.** This release closes all CRITICAL security gaps and is required for any public-facing deployment.
+
+#### 🚨 Authentication & Authorization (CRITICAL)
+- **Auth on all OAuth admin endpoints** — `GET/PATCH/DELETE` `/api/oauth/connections/*` and `GET/POST` `/api/oauth/[provider]/[action]/*` were unauthenticated; anyone on the network could list/inject/delete OAuth tokens
+- **Auth on multi-key endpoints** — `GET/POST/PUT/DELETE/PATCH` `/api/providers/[id]/keys/*` were unauthenticated; attackers could inject API keys into the proxy
+- **CSRF/Origin verification** improved across mutating endpoints
+
+#### 🛡️ Data Exposure (CRITICAL)
+- **Gemini API key moved out of URL** — was leaked via `?key=...` query param to logs/CDNs. Now uses `x-goog-api-key` header
+- **SSRF guard at proxy hot path** — defends against DB compromise / malicious restore (e.g. `http://169.254.169.254/` cloud metadata)
+
+#### 🗝️ Encryption & Operations (CRITICAL)
+- **ENCRYPTION_KEY split from JWT_SECRET** — JWT can now rotate without losing encrypted API keys (backward compatible — auto-pins on first upgrade)
+- **Atomic migrations** — wrapped in `BEGIN IMMEDIATE / COMMIT` so power loss mid-migration rolls back instead of corrupting DB
+- **Restore endpoint streaming** — was buffering 1.2GB into RAM (cap 100MB → unusable on production). Now streams to disk with 2GB cap
+- **Orphan logs preserved** — `request_logs.provider_id` set to NULL on provider delete (audit trail intact)
+- **Rate-limit window bug fixed** — keys were getting permanently rate-limited due to inverted comparison + missing reset
+
+#### ✅ Input Validation (Hardening)
+- `POST /api/keys` — name length (1-64), no control chars, allowedModels shape
+- `POST /api/combos` — name/slug/models validated, length caps
+- `PUT /api/combos/[id]` — partial validation
+- `POST /api/providers/[id]/keys` — apiKey 8-1000 chars, priority/maxErrors/rateLimit ranges
+- OAuth `import/exchange` — token length cap (100k chars)
+
+#### ⚡ Rate Limiting (Hardening)
+- `dashboardLimiter` (60/min/IP) on `/api/providers/fetch-models`, `test-model`, `health`
+- `oauthLimiter` (30/min/IP) on `/api/oauth/[provider]/[action]/*`
+- Existing `loginLimiter`, `chatLimiter`, `resetLimiter` preserved
+
+#### 🐛 Bug Fixes
+- **SSE `[DONE]` marker** added after synthetic usage chunk (clients like Cursor/Continue no longer hang)
+- **Mid-stream errors trigger `recordError`** — flaky providers/keys now properly penalized
+- **Multi-key rotation in fallback chain** — providers with multiple keys now exhausted before falling back to next provider
+- **`connection_id` persisted to `request_logs`** — multi-key debugging now possible
+- **Provider DELETE cleans up `provider_connections`** — fixed FK constraint failure
+- **Custom provider auto-creates `provider_connections`** entry on create/update
+- **Factory reset deletes `provider_connections` first** (FK order)
+- **Backup temp file race fixed** (Windows: UUID name + close-event unlink)
+- **CSV export escapes `\r`** (Windows line endings)
+- **SSE reload no longer no-op** (`setFilter(cur => cur)` replaced with direct `fetchAll`)
+- **Edit dialog uses controlled state** (no more `document.getElementById`)
+
+#### ✨ New Features
+- **Slim Backup non-blocking** — uses `ATTACH + INSERT INTO SELECT` (1-2 sec) instead of `DELETE + VACUUM` (30-120 sec event-loop block)
+- **SQL aggregation** for `/api/usage` and `/api/keys/[id]/stats` — was loading all logs into JS, now uses `GROUP BY` + indexed scans
+- **`apiFetch` wrapper** — handles 401 globally, redirects to login on session expire
+- **Confirmation dialogs** — replaced `confirm()` browser dialogs with shadcn AlertDialog (3 places)
+- **Pagination cap** on `/api/logs` (max 200) — prevents `?limit=999999` DoS
+- **AlertDialog confirmations** in Bahasa Indonesia for delete API key, delete OAuth, delete all models
+
+#### 🎨 UX & Polish
+- **Add Custom Provider modal simplified** — removed API key input + format select (now via detail page)
+- **Toggle handlers check `res.ok`** — no more silent failure on combo/key toggle
+- **Numeric inputs constrained** with `min`/`step` on priority/maxErrors
+- **Login form** has proper `<Label>` for password (a11y)
+- **`aria-label`** added to icon-only buttons (delete, reveal API key)
+- **Cookie `secure`** detected via `x-forwarded-proto` header (more reliable than `NODE_ENV`)
+
+#### 🧹 Code Quality
+- Dead `src/lib/auth/middleware.ts` deleted
+- Duplicate `checkAuth` helpers (6 files) → use shared `checkDashboardAuth`
+- Duplicate `maskApiKey` (2 files) → `src/lib/utils/mask-key.ts`
+- Duplicate `KNOWN_OAUTH_PROVIDERS` (3 files) → `src/lib/constants/oauth-providers.ts`
+- Duplicate token-saver descriptions (2 files) → `src/lib/constants/token-saver-copy.ts`
+- Dead SDK adapter code blocks (~120 lines) removed from proxy.ts
+- Unused `MAX_FALLBACK_RETRIES` removed
+- Empty catch blocks now log at debug level
+
+#### 📚 Schema & Database
+- `model_pricing` table added to Drizzle schema (was DB-only)
+- `provider_connections.provider` marked `notNull` (matches actual DB)
+- `request_logs.connection_id` column + index added
+- All NOT NULL constraints synced between Drizzle and SQLite
+
+### 🔄 Migration Notes
+- ENCRYPTION_KEY auto-pinned to existing JWT_SECRET on first upgrade — no data loss
+- DB migrations are now atomic — safe to interrupt
+- Existing API keys auto-migrated to `provider_connections` if not already done
+
+---
+
 ## [1.6.1] - 2026-06-21
 
 ### 🐛 Bug Fixes

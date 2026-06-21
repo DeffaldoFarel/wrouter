@@ -21,12 +21,18 @@ import {
 import { generatePKCE } from "@/lib/oauth/pkce";
 import { KIRO_CONSTANTS } from "@/lib/oauth/constants";
 import { createOrUpdateConnection } from "@/lib/oauth/connections";
+import { checkDashboardAuth } from "@/lib/auth/session";
+import { validateOAuthToken } from "@/lib/validation";
+import { oauthLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 import logger from "@/lib/logger";
 
 type RouteParams = { params: Promise<{ provider: string; action: string }> };
 
 // ─── GET Handler ───
 export async function GET(request: NextRequest, { params }: RouteParams) {
+  if (!checkDashboardAuth(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { provider, action } = await params;
 
   try {
@@ -54,10 +60,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 // ─── POST Handler ───
 export async function POST(request: NextRequest, { params }: RouteParams) {
+  if (!checkDashboardAuth(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // F4: Rate limit OAuth network-heavy operations (exchange/poll/import)
+  const ip = getClientIp(request);
+  const limitCheck = oauthLimiter.consume(ip);
+  if (!limitCheck.allowed) {
+    return rateLimitResponse(limitCheck.retryAfter);
+  }
+
   const { provider, action } = await params;
 
   try {
     const body = await request.json();
+
+    // E6: Validate OAuth token payload length (prevent DoS via huge tokens)
+    const tokenValidation = validateOAuthToken(body);
+    if (!tokenValidation.valid) {
+      return NextResponse.json(
+        { error: "Validation failed", errors: tokenValidation.errors },
+        { status: 400 }
+      );
+    }
 
     switch (action) {
       case "exchange":

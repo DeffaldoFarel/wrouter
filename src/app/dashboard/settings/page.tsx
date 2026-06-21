@@ -46,6 +46,10 @@ import {
   HardDrive,
   Shield,
 } from "lucide-react";
+import {
+  RTK_DESCRIPTION_LONG,
+  CAVEMAN_DESCRIPTION_LONG,
+} from "@/lib/constants/token-saver-copy";
 
 // ─────────────────────────────────────────────
 //  Constants
@@ -818,8 +822,7 @@ export default function SettingsPage() {
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Compresses tool_result content. Saves 20-40% input tokens
-                      with no quality loss.
+                      {RTK_DESCRIPTION_LONG}
                     </p>
                   </div>
                 </div>
@@ -855,8 +858,7 @@ export default function SettingsPage() {
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Aggressive terse-style output. Saves up to 65% output
-                      tokens. May reduce quality.
+                      {CAVEMAN_DESCRIPTION_LONG}
                     </p>
                   </div>
                 </div>

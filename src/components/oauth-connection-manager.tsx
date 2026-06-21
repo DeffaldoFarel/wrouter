@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Table,
@@ -34,6 +35,7 @@ import {
   Clock,
 } from "lucide-react";
 import { OAuthFlowModal } from "./oauth-flow-modal";
+import { getOAuthProviderLabel } from "@/lib/constants/oauth-providers";
 
 interface OAuthConnection {
   id: string;
@@ -61,18 +63,10 @@ export function OAuthConnectionManager({ open, onOpenChange, filterProvider }: C
   const [loading, setLoading] = useState(false);
   const [oauthModalOpen, setOauthModalOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  const getProviderLabel = (provider: string) => {
-    switch (provider) {
-      case "claude": return "Claude Code";
-      case "codex": return "OpenAI Codex";
-      case "github": return "GitHub Copilot";
-      case "cursor": return "Cursor";
-      case "kiro": return "Kiro";
-      case "gemini-cli": return "Gemini CLI";
-      default: return provider;
-    }
-  };
+  // Ambil label provider dari konstanta bersama.
+  const getProviderLabel = (provider: string) => getOAuthProviderLabel(provider);
 
   const fetchConnections = useCallback(async () => {
     try {
@@ -118,7 +112,6 @@ export function OAuthConnectionManager({ open, onOpenChange, filterProvider }: C
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this OAuth connection?")) return;
     try {
       const res = await fetch(`/api/oauth/connections/${id}`, {
         method: "DELETE",
@@ -129,6 +122,13 @@ export function OAuthConnectionManager({ open, onOpenChange, filterProvider }: C
     } catch {
       toast.error("Failed to delete connection");
     }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTargetId) return;
+    const id = deleteTargetId;
+    setDeleteTargetId(null);
+    await handleDelete(id);
   };
 
   const handleRefresh = async (id: string) => {
@@ -280,7 +280,7 @@ export function OAuthConnectionManager({ open, onOpenChange, filterProvider }: C
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleDelete(conn.id)}
+                            onClick={() => setDeleteTargetId(conn.id)}
                             title="Delete"
                           >
                             <Trash2 className="h-4 w-4 text-destructive" />
@@ -302,6 +302,37 @@ export function OAuthConnectionManager({ open, onOpenChange, filterProvider }: C
         provider={selectedProvider}
         onSuccess={handleOAuthSuccess}
       />
+
+      {/* Delete OAuth Connection Confirmation Dialog */}
+      <Dialog
+        open={!!deleteTargetId}
+        onOpenChange={(open) => !open && setDeleteTargetId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              Hapus Koneksi OAuth
+            </DialogTitle>
+            <DialogDescription>
+              Apakah Anda yakin ingin menghapus koneksi OAuth ini? Tindakan ini
+              tidak dapat dibatalkan dan permintaan yang menggunakan koneksi
+              ini akan gagal.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTargetId(null)}
+            >
+              Batal
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              Hapus Koneksi
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

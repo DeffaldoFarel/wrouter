@@ -124,7 +124,7 @@ function connectionToRow(
   return {
     id,
     providerId: providerId ?? null,
-    provider: provider ?? null,
+    provider: provider ?? authType ?? "unknown",
     authType,
     name: name ?? null,
     email: email ?? null,

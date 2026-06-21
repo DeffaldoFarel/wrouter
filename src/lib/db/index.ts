@@ -221,11 +221,54 @@ export function initializeDatabase() {
   try { sqlite.exec(`CREATE INDEX IF NOT EXISTS pc_provider_id_idx ON provider_connections(provider_id)`); } catch {}
   try { sqlite.exec(`CREATE INDEX IF NOT EXISTS pc_provider_id_active_idx ON provider_connections(provider_id, is_active)`); } catch {}
 
+  // Migration: add connection_id column to request_logs (I5: multi-key debugging)
+  try {
+    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN connection_id TEXT`);
+  } catch { /* already exists */ }
+  try {
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS connection_id_idx ON request_logs(connection_id)`);
+  } catch { /* already exists */ }
+
   // Migration: add cost_usd column to request_logs if not exists
   try {
     sqlite.exec(`ALTER TABLE request_logs ADD COLUMN cost_usd TEXT`);
   } catch {
     // Column already exists, ignore
+  }
+
+  // Migration: remove NOT NULL constraint from providers.api_key (keys are now optional, managed via provider_connections)
+  try {
+    const hasNotNull = sqlite.prepare("SELECT sql FROM sqlite_master WHERE name='providers'").get() as { sql: string } | undefined;
+    if (hasNotNull && hasNotNull.sql && hasNotNull.sql.includes('api_key TEXT NOT NULL')) {
+      // SQLite doesn't support ALTER COLUMN, so recreate the table.
+      // Wrap in transaction for atomicity — if process is killed mid-migration,
+      // the entire change rolls back instead of leaving the DB in a half-migrated state.
+      sqlite.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE providers_new (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          base_url TEXT NOT NULL,
+          api_key TEXT,
+          models TEXT NOT NULL DEFAULT '[]',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          prefix TEXT NOT NULL DEFAULT '',
+          type TEXT NOT NULL DEFAULT 'custom',
+          format TEXT NOT NULL DEFAULT 'openai',
+          connection_strategy TEXT NOT NULL DEFAULT 'priority'
+        );
+        INSERT INTO providers_new (id, name, base_url, api_key, models, enabled, created_at, updated_at, prefix, type, format, connection_strategy)
+          SELECT id, name, base_url, api_key, models, enabled, created_at, updated_at, prefix, type, format, connection_strategy FROM providers;
+        DROP TABLE providers;
+        ALTER TABLE providers_new RENAME TO providers;
+        COMMIT;
+      `);
+      console.log('[db] Removed NOT NULL constraint from providers.api_key (atomic migration)');
+    }
+  } catch (e) {
+    console.error('[db] Migration api_key NOT NULL failed:', e);
   }
 
   // Migration: migrate existing providers.apiKey to provider_connections (multi-key support)

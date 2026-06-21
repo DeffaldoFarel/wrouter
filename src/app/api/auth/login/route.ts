@@ -36,9 +36,13 @@ export async function POST(req: NextRequest) {
     logger.info({ ip, success: true }, "Login attempt succeeded");
 
     const response = NextResponse.json({ success: true });
+    // K9: Detect HTTPS reliably via x-forwarded-proto (set by reverse proxy)
+    // or request scheme. NODE_ENV alone is unreliable when systemd/docker forgets to set it.
+    const proto = req.headers.get("x-forwarded-proto") || new URL(req.url).protocol.replace(":", "");
+    const isSecure = proto === "https" || process.env.NODE_ENV === "production";
     response.cookies.set("session_token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isSecure,
       sameSite: "lax",
       maxAge: 60 * 60 * 24, // 24 hours
       path: "/",

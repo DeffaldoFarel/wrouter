@@ -5,22 +5,27 @@ const IV_LENGTH = 16;
 const PREFIX = "enc:v1:";
 
 /**
- * Derive a unique, deterministic salt from JWT_SECRET.
- * This ensures each installation has a unique salt without storing it separately.
+ * Derive a unique, deterministic salt.
+ * Uses ENCRYPTION_KEY as the source so encrypted data is independent from JWT rotation.
+ * Falls back to JWT_SECRET for backward compatibility with pre-split installs.
  */
 function getDerivedSalt(): string {
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    throw new Error("JWT_SECRET environment variable must be set for salt derivation");
+  // Prefer ENCRYPTION_KEY salt for new installs
+  const source = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET;
+  if (!source) {
+    throw new Error("ENCRYPTION_KEY or JWT_SECRET must be set for salt derivation");
   }
-  // Hash JWT_SECRET with a fixed context to produce a unique salt per installation
-  return crypto.createHash("sha256").update(`${jwtSecret}:wrouter-salt-v1`).digest("hex");
+  return crypto.createHash("sha256").update(`${source}:wrouter-salt-v1`).digest("hex");
 }
 
 /**
  * Derive a 32-byte encryption key from environment variables.
- * Priority: ENCRYPTION_KEY (direct or derived) > JWT_SECRET (derived via scrypt)
- * Salt is now derived from JWT_SECRET to ensure uniqueness per installation.
+ * Priority: ENCRYPTION_KEY (preferred — independent of JWT) > JWT_SECRET (legacy fallback)
+ *
+ * IMPORTANT: ENCRYPTION_KEY is now separate from JWT_SECRET so JWT_SECRET can be
+ * rotated for session security without breaking existing encrypted API keys in the DB.
+ * Bootstrap automatically pins ENCRYPTION_KEY to the existing JWT_SECRET on first
+ * upgrade to preserve backward compatibility.
  */
 function getEncryptionKey(): Buffer {
   const directKey = process.env.ENCRYPTION_KEY;
@@ -34,9 +39,9 @@ function getEncryptionKey(): Buffer {
     return crypto.scryptSync(directKey, salt, 32);
   }
 
+  // Legacy fallback: JWT_SECRET (only kicks in if ENCRYPTION_KEY truly absent)
   const jwtSecret = process.env.JWT_SECRET;
   if (jwtSecret) {
-    // Derive key from JWT_SECRET using its own hash as salt for uniqueness
     const salt = getDerivedSalt();
     return crypto.scryptSync(jwtSecret, salt, 32);
   }

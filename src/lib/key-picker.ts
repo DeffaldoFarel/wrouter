@@ -11,14 +11,13 @@
  * Inspired by GenflowAi/9router connection picker.
  */
 import { db } from "./db";
-import { providerConnections } from "./db/schema";
-import { eq, and, isNull, lte, lt, or, asc, sql } from "drizzle-orm";
+import { providerConnections, providers } from "./db/schema";
+import { eq, and, isNull, lte, lt, or, asc, sql, notInArray } from "drizzle-orm";
 import { safeDecryptApiKey } from "./crypto";
 import { encrypt } from "./crypto";
 import { v4 as uuidv4 } from "uuid";
 
 // Maximum retry attempts when fallback to next key
-const MAX_FALLBACK_RETRIES = 3;
 
 // ─── Types ───
 
@@ -45,20 +44,29 @@ function isNow(): string {
 
 /**
  * Check if a connection is currently rate-limited.
+ *
+ * Two mechanisms:
+ *  1. Explicit `rateLimitedUntil` timestamp (set by upstream 429 with Retry-After).
+ *  2. Usage-based: `currentUsage >= rateLimit` within `rateLimitWindow` seconds of `lastUsedAt`.
+ *
+ * The window is calculated FORWARD from `lastUsedAt` — the connection is rate-limited
+ * only while we are still within `lastUsedAt + rateLimitWindow`. Once the window expires,
+ * `recordUsage` will reset `currentUsage` to 0 on the next request.
  */
 function isRateLimited(conn: typeof providerConnections.$inferSelect): boolean {
-  // Explicit rateLimitedUntil timestamp
+  // Explicit rateLimitedUntil timestamp (e.g. set on 429 with Retry-After)
   if (conn.rateLimitedUntil) {
     return new Date(conn.rateLimitedUntil) > new Date();
   }
   // Usage-based rate limiting
   if (conn.rateLimit && conn.rateLimitWindow && conn.currentUsage >= conn.rateLimit) {
     if (conn.lastUsedAt) {
-      const windowStart = new Date(conn.lastUsedAt).getTime() - conn.rateLimitWindow * 1000;
-      if (new Date().getTime() >= windowStart) {
-        return true; // Still within the window and at max usage
+      // Window ends at lastUsedAt + rateLimitWindow seconds
+      const windowEnd = new Date(conn.lastUsedAt).getTime() + conn.rateLimitWindow * 1000;
+      if (Date.now() < windowEnd) {
+        return true; // Still within active window and at max usage
       }
-      // Window expired — would need a reset, but for now treat as limited
+      // Window expired — connection is NOT rate-limited; recordUsage() will reset currentUsage on next call
     }
   }
   return false;
@@ -73,26 +81,39 @@ function isDisabledByErrors(conn: typeof providerConnections.$inferSelect): bool
 
 /**
  * Get all active API key connections for a provider, ordered by priority.
+ *
+ * @param providerId — provider to look up connections for
+ * @param excludeConnectionIds — connection IDs to filter out (e.g., already-tried keys
+ *   in the current request's failover loop). Useful for I4 per-provider key rotation.
  */
-function getAvailableConnections(providerId: string): typeof providerConnections.$inferSelect[] {
+function getAvailableConnections(
+  providerId: string,
+  excludeConnectionIds?: string[],
+): typeof providerConnections.$inferSelect[] {
   const now = isNow();
+  const excludes = excludeConnectionIds?.filter(Boolean) ?? [];
+
+  const conditions = [
+    eq(providerConnections.providerId, providerId),
+    eq(providerConnections.isActive, true),
+    eq(providerConnections.authType, "apikey"),
+    // Not rate-limited
+    or(
+      isNull(providerConnections.rateLimitedUntil),
+      lte(providerConnections.rateLimitedUntil, now),
+    ),
+    // Not disabled by errors
+    lt(providerConnections.errorCount, providerConnections.maxErrors),
+  ];
+
+  if (excludes.length > 0) {
+    conditions.push(notInArray(providerConnections.id, excludes));
+  }
+
   return db
     .select()
     .from(providerConnections)
-    .where(
-      and(
-        eq(providerConnections.providerId, providerId),
-        eq(providerConnections.isActive, true),
-        eq(providerConnections.authType, "apikey"),
-        // Not rate-limited
-        or(
-          isNull(providerConnections.rateLimitedUntil),
-          lte(providerConnections.rateLimitedUntil, now),
-        ),
-        // Not disabled by errors
-        lt(providerConnections.errorCount, providerConnections.maxErrors),
-      ),
-    )
+    .where(and(...conditions))
     .orderBy(asc(providerConnections.priority))
     .all();
 }
@@ -102,10 +123,19 @@ function getAvailableConnections(providerId: string): typeof providerConnections
 /**
  * Pick the best available API key for a provider based on its connection strategy.
  *
- * Returns null if no key is available (all rate-limited, disabled, or don't exist).
+ * @param providerId — provider to pick a key for
+ * @param strategy — \"priority\" | \"round-robin\" | \"random\" (defaults to \"priority\")
+ * @param excludeConnectionIds — connection IDs to skip (e.g., already-tried keys
+ *   in the current request's failover loop). Used by I4 per-provider key rotation.
+ *
+ * Returns null if no key is available (all rate-limited, disabled, excluded, or don't exist).
  */
-export function pickConnection(providerId: string, strategy?: string): KeyPickResult {
-  const connections = getAvailableConnections(providerId);
+export function pickConnection(
+  providerId: string,
+  strategy?: string,
+  excludeConnectionIds?: string[],
+): KeyPickResult {
+  const connections = getAvailableConnections(providerId, excludeConnectionIds);
 
   if (connections.length === 0) {
     return { key: null, connectionId: null, reason: "No available connections" };
@@ -169,12 +199,38 @@ export function pickConnection(providerId: string, strategy?: string): KeyPickRe
  */
 function recordUsage(connectionId: string): void {
   const now = isNow();
-  // Update lastUsedAt
+  const nowMs = Date.now();
+
+  // Read connection to check if rate-limit window has expired
+  const conn = db
+    .select()
+    .from(providerConnections)
+    .where(eq(providerConnections.id, connectionId))
+    .get();
+
+  // Reset currentUsage to 1 (this request) when window expires
+  if (
+    conn &&
+    conn.rateLimit &&
+    conn.rateLimitWindow &&
+    conn.lastUsedAt
+  ) {
+    const windowEnd = new Date(conn.lastUsedAt).getTime() + conn.rateLimitWindow * 1000;
+    if (nowMs >= windowEnd) {
+      // Window expired — reset usage counter, then this request becomes the new window's first hit
+      db.update(providerConnections)
+        .set({ lastUsedAt: now, currentUsage: 1 })
+        .where(eq(providerConnections.id, connectionId))
+        .run();
+      return;
+    }
+  }
+
+  // Standard path: increment usage atomically
   db.update(providerConnections)
     .set({ lastUsedAt: now })
     .where(eq(providerConnections.id, connectionId))
     .run();
-  // Atomic increment of currentUsage via raw SQL
   db.run(sql`UPDATE provider_connections SET current_usage = COALESCE(current_usage, 0) + 1 WHERE id = ${connectionId}`);
 }
 
@@ -345,10 +401,14 @@ export function createApiKeyConnection(input: CreateApiKeyConnectionInput): type
   const now = isNow();
   const id = uuidv4();
 
+  // Get provider prefix for the NOT NULL provider column
+  const providerRow = db.select().from(providers).where(eq(providers.id, input.providerId)).get();
+  const providerPrefix = providerRow?.prefix || input.providerId;
+
   const row = {
     id,
     providerId: input.providerId,
-    provider: null,
+    provider: providerPrefix,
     authType: "apikey" as const,
     name: input.name,
     email: null,

@@ -8,11 +8,15 @@ import {
   updateConnection,
   deleteConnection,
 } from "@/lib/oauth/connections";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import logger from "@/lib/logger";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  if (!checkDashboardAuth(request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id } = await params;
 
   try {
@@ -44,6 +48,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 }
 
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+  if (!checkDashboardAuth(_request)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id } = await params;
 
   try {

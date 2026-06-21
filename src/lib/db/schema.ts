@@ -56,7 +56,8 @@ export const requestLogs = sqliteTable("request_logs", {
   model: text("model"),
   providerId: text("provider_id"),
   comboId: text("combo_id"),
-  apiKeyId: text("api_key_id"),  // which API key made this request
+  apiKeyId: text("api_key_id"),  // which API key (dashboard wkz-) made this request
+  connectionId: text("connection_id"),  // I5: which provider_connection (multi-key) served this request
   tokensIn: integer("tokens_in"),
   tokensOut: integer("tokens_out"),
   latencyMs: integer("latency_ms"),
@@ -72,6 +73,7 @@ export const requestLogs = sqliteTable("request_logs", {
   timestampIdx: index("timestamp_idx").on(table.timestamp),
   providerIdIdx: index("provider_id_idx").on(table.providerId),
   apiKeyIdIdx: index("api_key_id_idx").on(table.apiKeyId),
+  connectionIdIdx: index("connection_id_idx").on(table.connectionId),
   modelIdx: index("model_idx").on(table.model),
   statusIdx: index("status_idx").on(table.status),
   isStreamingIdx: index("is_streaming_idx").on(table.isStreaming),
@@ -109,7 +111,8 @@ export const providerConnections = sqliteTable(
     providerId: text("provider_id").references(() => providers.id),
     // Provider type: "claude" | "codex" | "github" | "cursor" | "kiro" | "openai" | "anthropic" | "gemini" | ...
     // Used for OAuth connections (when providerId is null for non-provider-specific accounts)
-    provider: text("provider"),
+    // J2: NOT NULL in actual DB — must be set on every insert (use prefix or authType as fallback)
+    provider: text("provider").notNull(),
     // Auth method: "oauth" | "apikey" | "access_token" | "cookie"
     authType: text("auth_type").notNull(),
     name: text("name"),
@@ -142,5 +145,28 @@ export const providerConnections = sqliteTable(
     providerActiveIdx: index("pc_provider_active_idx").on(table.provider, table.isActive),
     providerIdActiveIdx: index("pc_provider_id_active_idx").on(table.providerId, table.isActive),
     priorityIdx: index("pc_priority_idx").on(table.priority),
+  })
+);
+
+// ─── Model Pricing ───
+// Cost per 1M tokens for known model patterns. Used by cost-calculator.ts as fallback
+// when upstream provider doesn't return cost. Patterns can be exact ("gpt-4o") or
+// prefix-style ("claude-opus-*").
+export const modelPricing = sqliteTable(
+  "model_pricing",
+  {
+    id: text("id").primaryKey(),
+    modelPattern: text("model_pattern").notNull(),
+    providerPrefix: text("provider_prefix"),
+    inputPricePerM: text("input_price_per_m").notNull().default("0"),
+    outputPricePerM: text("output_price_per_m").notNull().default("0"),
+    cachedInputPricePerM: text("cached_input_price_per_m"),
+    displayName: text("display_name"),
+    source: text("source").notNull().default("manual"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => ({
+    modelPatternIdx: index("mp_model_pattern_idx").on(table.modelPattern),
+    providerPrefixIdx: index("mp_provider_prefix_idx").on(table.providerPrefix),
   })
 );

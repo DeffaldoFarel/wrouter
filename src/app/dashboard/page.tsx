@@ -50,6 +50,10 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Link from "next/link";
+import {
+  RTK_DESCRIPTION_SHORT,
+  CAVEMAN_DESCRIPTION_SHORT,
+} from "@/lib/constants/token-saver-copy";
 
 interface ApiKey {
   id: string;
@@ -266,6 +270,7 @@ export default function DashboardPage() {
   const [editingKey, setEditingKey] = useState<ApiKey | null>(null);
   const [selectedKeyId, setSelectedKeyId] = useState<string>("");
   const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
+  const [deleteApiKeyTarget, setDeleteApiKeyTarget] = useState<ApiKey | null>(null);
 
   useEffect(() => {
     fetchAll();
@@ -361,11 +366,17 @@ export default function DashboardPage() {
 
   async function toggleApiKey(id: string, enabled: boolean) {
     try {
-      await fetch(`/api/keys/${id}`, {
+      const res = await fetch(`/api/keys/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to update API key");
+        return;
+      }
+      toast.success(enabled ? "API key enabled" : "API key disabled");
       fetchAll();
     } catch {
       toast.error("Failed to update API key");
@@ -373,7 +384,6 @@ export default function DashboardPage() {
   }
 
   async function deleteApiKey(id: string) {
-    if (!confirm("Are you sure you want to delete this API key?")) return;
     try {
       const res = await fetch(`/api/keys/${id}`, { method: "DELETE" });
       if (res.ok) {
@@ -383,6 +393,13 @@ export default function DashboardPage() {
     } catch {
       toast.error("Failed to delete API key");
     }
+  }
+
+  async function confirmDeleteApiKey() {
+    if (!deleteApiKeyTarget) return;
+    const id = deleteApiKeyTarget.id;
+    setDeleteApiKeyTarget(null);
+    await deleteApiKey(id);
   }
 
   function toggleReveal(id: string) {
@@ -752,7 +769,7 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Compress tool_result. Saves 20-40% input tokens.
+                  {RTK_DESCRIPTION_SHORT}
                 </p>
               </div>
               <Switch
@@ -772,7 +789,7 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Terse-style output. Saves up to 65% output tokens.
+                  {CAVEMAN_DESCRIPTION_SHORT}
                 </p>
               </div>
               <Switch
@@ -849,6 +866,7 @@ export default function DashboardPage() {
                               className="h-7 w-7 p-0"
                               onClick={() => toggleReveal(apiKey.id)}
                               title={isRevealed ? "Hide" : "Reveal"}
+                              aria-label={isRevealed ? "Hide API key" : "Reveal API key"}
                             >
                               {isRevealed ? (
                                 <EyeOff className="h-3.5 w-3.5" />
@@ -908,8 +926,9 @@ export default function DashboardPage() {
                               size="sm"
                               variant="ghost"
                               className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => deleteApiKey(apiKey.id)}
+                              onClick={() => setDeleteApiKeyTarget(apiKey)}
                               title="Delete"
+                              aria-label="Delete API key"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -1228,6 +1247,40 @@ export default function DashboardPage() {
               Cancel
             </Button>
             <Button onClick={saveAllowedModels}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete API Key Confirmation Dialog */}
+      <Dialog
+        open={!!deleteApiKeyTarget}
+        onOpenChange={(open) => !open && setDeleteApiKeyTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              Hapus API Key
+            </DialogTitle>
+            <DialogDescription>
+              Apakah Anda yakin ingin menghapus API key{" "}
+              <strong className="text-foreground">
+                {deleteApiKeyTarget?.name}
+              </strong>
+              ? Tindakan ini tidak dapat dibatalkan dan permintaan API yang
+              menggunakan key ini akan gagal.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteApiKeyTarget(null)}
+            >
+              Batal
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteApiKey}>
+              Hapus API Key
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

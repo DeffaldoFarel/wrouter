@@ -1144,7 +1144,8 @@ export default function UsagePage() {
             setLogs([]);
             setLogsTotal(0);
             setUsage(null);
-            setFilter((cur) => cur); // trigger refetch
+            // Direct refetch — setFilter(cur => cur) is a no-op in React when value is unchanged
+            fetchAll(filter);
           }
         } catch {
           /* ignore */
@@ -1231,7 +1232,7 @@ export default function UsagePage() {
         row
           .map((cell) => {
             const str = String(cell);
-            return str.includes(",") || str.includes('"') || str.includes("\n")
+            return str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")
               ? `"${str.replace(/"/g, '""')}"`
               : str;
           })

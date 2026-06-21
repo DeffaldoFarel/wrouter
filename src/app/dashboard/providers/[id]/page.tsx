@@ -229,6 +229,7 @@ export default function ProviderDetailPage() {
   const [fetchingModels, setFetchingModels] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteAllModelsOpen, setDeleteAllModelsOpen] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
 
   // Edit form state
@@ -274,6 +275,11 @@ export default function ProviderDetailPage() {
   const [keysLoading, setKeysLoading] = useState(false);
   const [addKeyOpen, setAddKeyOpen] = useState(false);
   const [editKeyOpen, setEditKeyOpen] = useState<string | null>(null);
+  const [editKeyForm, setEditKeyForm] = useState<{ name: string; priority: number; maxErrors: number }>({
+    name: "",
+    priority: 0,
+    maxErrors: 5,
+  });
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyApiKey, setNewKeyApiKey] = useState("");
   const [newKeyPriority, setNewKeyPriority] = useState(0);
@@ -976,16 +982,20 @@ export default function ProviderDetailPage() {
                           <Label>Priority</Label>
                           <Input
                             type="number"
+                            min={0}
+                            step={1}
                             value={newKeyPriority}
-                            onChange={(e) => setNewKeyPriority(Number(e.target.value))}
+                            onChange={(e) => setNewKeyPriority(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
                           />
                         </div>
                         <div>
                           <Label>Max Errors</Label>
                           <Input
                             type="number"
+                            min={1}
+                            step={1}
                             value={newKeyMaxErrors}
-                            onChange={(e) => setNewKeyMaxErrors(Number(e.target.value))}
+                            onChange={(e) => setNewKeyMaxErrors(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
                           />
                         </div>
                       </div>
@@ -1087,7 +1097,14 @@ export default function ProviderDetailPage() {
                             <DialogTrigger>
                               <span
                                 className="inline-flex items-center justify-center h-7 w-7 p-0 rounded-md hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                                onClick={() => setEditKeyOpen(key.id)}
+                                onClick={() => {
+                                  setEditKeyForm({
+                                    name: key.name || "",
+                                    priority: key.priority ?? 0,
+                                    maxErrors: key.maxErrors ?? 5,
+                                  });
+                                  setEditKeyOpen(key.id);
+                                }}
                               >
                                 <Settings className="h-3.5 w-3.5" />
                               </span>
@@ -1100,24 +1117,28 @@ export default function ProviderDetailPage() {
                                 <div>
                                   <Label>Name</Label>
                                   <Input
-                                    defaultValue={key.name}
-                                    id={`edit-key-name-${key.id}`}
+                                    value={editKeyForm.name}
+                                    onChange={(e) => setEditKeyForm((f) => ({ ...f, name: e.target.value }))}
                                   />
                                 </div>
                                 <div>
                                   <Label>Priority</Label>
                                   <Input
                                     type="number"
-                                    defaultValue={key.priority}
-                                    id={`edit-key-priority-${key.id}`}
+                                    min={0}
+                                    step={1}
+                                    value={editKeyForm.priority}
+                                    onChange={(e) => setEditKeyForm((f) => ({ ...f, priority: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
                                   />
                                 </div>
                                 <div>
                                   <Label>Max Errors</Label>
                                   <Input
                                     type="number"
-                                    defaultValue={key.maxErrors}
-                                    id={`edit-key-maxerrors-${key.id}`}
+                                    min={1}
+                                    step={1}
+                                    value={editKeyForm.maxErrors}
+                                    onChange={(e) => setEditKeyForm((f) => ({ ...f, maxErrors: Math.max(1, Math.floor(Number(e.target.value) || 1)) }))}
                                   />
                                 </div>
                               </div>
@@ -1126,13 +1147,10 @@ export default function ProviderDetailPage() {
                                   Cancel
                                 </Button>
                                 <Button onClick={() => {
-                                  const nameEl = document.getElementById(`edit-key-name-${key.id}`) as HTMLInputElement;
-                                  const priorityEl = document.getElementById(`edit-key-priority-${key.id}`) as HTMLInputElement;
-                                  const maxErrorsEl = document.getElementById(`edit-key-maxerrors-${key.id}`) as HTMLInputElement;
                                   handleUpdateKey(key.id, {
-                                    name: nameEl.value,
-                                    priority: Number(priorityEl.value),
-                                    maxErrors: Number(maxErrorsEl.value),
+                                    name: editKeyForm.name,
+                                    priority: editKeyForm.priority,
+                                    maxErrors: editKeyForm.maxErrors,
                                   });
                                 }}>Save</Button>
                               </DialogFooter>
@@ -1204,12 +1222,7 @@ export default function ProviderDetailPage() {
                       variant="outline"
                       size="sm"
                       className="text-destructive hover:bg-destructive/10"
-                      onClick={() => {
-                        if (confirm("Are you sure you want to delete all models?")) {
-                          setModelList([]);
-                          setModelHealth({});
-                        }
-                      }}
+                      onClick={() => setDeleteAllModelsOpen(true)}
                     >
                       <Trash2 className="h-3.5 w-3.5 mr-1" />
                       Clear All
@@ -1466,6 +1479,41 @@ export default function ProviderDetailPage() {
           </div>
         )}
       </form>
+
+      {/* Delete All Models Confirmation Dialog */}
+      <Dialog open={deleteAllModelsOpen} onOpenChange={setDeleteAllModelsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              Hapus Semua Model
+            </DialogTitle>
+            <DialogDescription>
+              Apakah Anda yakin ingin menghapus semua model dari provider ini?
+              Tindakan ini akan mengosongkan daftar model dan riwayat
+              kesehatannya.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteAllModelsOpen(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setModelList([]);
+                setModelHealth({});
+                setDeleteAllModelsOpen(false);
+              }}
+            >
+              Hapus Semua
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

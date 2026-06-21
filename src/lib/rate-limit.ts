@@ -98,6 +98,20 @@ export const resetLimiter = new RateLimiter({
   windowMs: 60_000,
 });
 
+/** Dashboard outbound operations (fetch-models, test-model, health): 60/min per IP */
+export const dashboardLimiter = new RateLimiter({
+  maxTokens: 60,
+  refillRate: 60,
+  windowMs: 60_000,
+});
+
+/** OAuth exchange/poll/import: 30/min per IP (network-heavy outbound calls) */
+export const oauthLimiter = new RateLimiter({
+  maxTokens: 30,
+  refillRate: 30,
+  windowMs: 60_000,
+});
+
 // --- Helpers ---
 
 /**

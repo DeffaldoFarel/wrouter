@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { providers } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { verifySession } from "@/lib/auth/session";
+import { providers, providerConnections } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { checkDashboardAuth } from "@/lib/auth/session";
 import { safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
+import { dashboardLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 
 function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
+  return checkDashboardAuth(req) !== null;
 }
 
 export async function GET(
@@ -17,6 +17,13 @@ export async function GET(
 ) {
   if (!checkAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // F3: Rate limit outbound health check (60/min/IP)
+  const ip = getClientIp(req);
+  const limitCheck = dashboardLimiter.consume(ip);
+  if (!limitCheck.allowed) {
+    return rateLimitResponse(limitCheck.retryAfter);
   }
 
   const { id } = await params;
@@ -41,7 +48,26 @@ export async function GET(
     }
 
     try {
-      if (!provider.apiKey) {
+      // Resolve API key: check provider_connections first, fallback to legacy provider.apiKey
+      let resolvedApiKey: string | null = null;
+      const conn = db.select().from(providerConnections)
+        .where(and(
+          eq(providerConnections.providerId, id),
+          eq(providerConnections.authType, "apikey"),
+          eq(providerConnections.isActive, true)
+        ))
+        .get();
+      if (conn?.data) {
+        try {
+          const data = JSON.parse(conn.data);
+          if (data.apiKey) resolvedApiKey = safeDecryptApiKey(data.apiKey);
+        } catch (e) {
+          console.warn("[health] Failed to parse connection data:", e);
+        }
+      }
+      if (!resolvedApiKey && provider.apiKey) resolvedApiKey = safeDecryptApiKey(provider.apiKey);
+
+      if (!resolvedApiKey) {
         return NextResponse.json({
           online: false,
           error: "No API key configured",
@@ -54,7 +80,7 @@ export async function GET(
 
       const res = await fetch(`${provider.baseUrl}/models`, {
         headers: {
-          Authorization: `Bearer ${safeDecryptApiKey(provider.apiKey)}`,
+          Authorization: `Bearer ${resolvedApiKey}`,
           "Content-Type": "application/json",
         },
         signal: controller.signal,

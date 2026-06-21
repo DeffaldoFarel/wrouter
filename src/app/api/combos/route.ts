@@ -4,6 +4,7 @@ import { combos } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkDashboardAuth } from "@/lib/auth/session";
+import { validateCombo } from "@/lib/validation";
 
 export async function GET(req: NextRequest) {
   if (!checkDashboardAuth(req)) {
@@ -26,22 +27,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
+
+    const validation = validateCombo(body);
+    if (!validation.valid) {
+      return NextResponse.json(
+        { error: "Validation failed", errors: validation.errors },
+        { status: 400 }
+      );
+    }
+
     const { name, slug, models } = body;
-
-    if (!name || !slug) {
-      return NextResponse.json(
-        { error: "name and slug are required" },
-        { status: 400 }
-      );
-    }
-
-    // Validate slug format (lowercase, alphanumeric, hyphens)
-    if (!/^[a-z0-9-]+$/.test(slug)) {
-      return NextResponse.json(
-        { error: "slug must be lowercase alphanumeric with hyphens only" },
-        { status: 400 }
-      );
-    }
 
     // Check slug uniqueness
     const existing = db.select().from(combos).where(eq(combos.slug, slug)).get();

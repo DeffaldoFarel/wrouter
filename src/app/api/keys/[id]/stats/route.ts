@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requestLogs, apiKeys } from "@/lib/db/schema";
-import { eq, gte, and } from "drizzle-orm";
+import { sql, eq, gte, and } from "drizzle-orm";
 import { checkDashboardAuth } from "@/lib/auth/session";
 
 function getStartDate(f: string): Date {
@@ -34,32 +34,38 @@ export async function GET(
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter") || "30d";
   const startDate = getStartDate(filter);
+  const startISO = startDate.toISOString();
 
-  // Filter at DB level using both conditions (uses timestamp_idx + api_key_id_idx)
-  const logs = db
+  // ─── Summary aggregation in SQL (uses timestamp_idx + api_key_id_idx) ───
+  // Replaces the old "load all logs into JS, then reduce/filter" path.
+  // NULLIF(latency_ms, 0) mirrors the JS `filter((l) => l.latencyMs)` semantics
+  // (zero/null are excluded from the average).
+  const summaryRow = db
+    .select({
+      totalRequests:  sql<number>`COUNT(*)`,
+      totalErrors:    sql<number>`COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0)`,
+      totalTokensIn:  sql<number>`COALESCE(SUM(tokens_in), 0)`,
+      totalTokensOut: sql<number>`COALESCE(SUM(tokens_out), 0)`,
+      avgLatencyRaw:  sql<number | null>`AVG(NULLIF(latency_ms, 0))`,
+    })
+    .from(requestLogs)
+    .where(and(eq(requestLogs.apiKeyId, id), gte(requestLogs.timestamp, startISO)))
+    .get();
+
+  const totalRequests  = summaryRow?.totalRequests ?? 0;
+  const totalErrors    = summaryRow?.totalErrors ?? 0;
+  const totalTokensIn  = summaryRow?.totalTokensIn ?? 0;
+  const totalTokensOut = summaryRow?.totalTokensOut ?? 0;
+  const avgLatency = summaryRow?.avgLatencyRaw != null ? Math.round(summaryRow.avgLatencyRaw) : 0;
+
+  // ─── Last 10 requests via ORDER BY + LIMIT ───
+  const recentLogs = db
     .select()
     .from(requestLogs)
-    .where(
-      and(
-        eq(requestLogs.apiKeyId, id),
-        gte(requestLogs.timestamp, startDate.toISOString())
-      )
-    )
+    .where(and(eq(requestLogs.apiKeyId, id), gte(requestLogs.timestamp, startISO)))
+    .orderBy(sql`timestamp DESC`)
+    .limit(10)
     .all();
-
-  const totalRequests = logs.length;
-  const totalErrors   = logs.filter((l) => l.status === "error").length;
-  const totalTokensIn  = logs.reduce((s, l) => s + (l.tokensIn  || 0), 0);
-  const totalTokensOut = logs.reduce((s, l) => s + (l.tokensOut || 0), 0);
-  const logsWithLatency = logs.filter((l) => l.latencyMs);
-  const avgLatency = logsWithLatency.length > 0
-    ? Math.round(logsWithLatency.reduce((s, l) => s + (l.latencyMs || 0), 0) / logsWithLatency.length)
-    : 0;
-
-  // Last 10 requests
-  const recentLogs = [...logs]
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    .slice(0, 10);
 
   return NextResponse.json({
     keyId: id,

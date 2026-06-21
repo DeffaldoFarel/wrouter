@@ -3,6 +3,7 @@ import { db, generateApiKey } from "@/lib/db";
 import { apiKeys } from "@/lib/db/schema";
 import { v4 as uuidv4 } from "uuid";
 import { checkDashboardAuth } from "@/lib/auth/session";
+import { validateApiKey } from "@/lib/validation";
 
 export async function GET(req: NextRequest) {
   if (!checkDashboardAuth(req)) {
@@ -35,18 +36,20 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name } = body;
 
-    if (!name) {
+    const validation = validateApiKey(body);
+    if (!validation.valid) {
       return NextResponse.json(
-        { error: "name is required" },
+        { error: "Validation failed", errors: validation.errors },
         { status: 400 }
       );
     }
 
+    const { name } = body;
+
     const newKey = {
       id: uuidv4(),
-      name,
+      name: name.trim(),
       key: generateApiKey(),
       enabled: true,
       allowedModels: "[]",

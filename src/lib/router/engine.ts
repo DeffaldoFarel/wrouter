@@ -152,6 +152,57 @@ function buildRoutingResult(
   };
 }
 
+/**
+ * I4: Build multiple RoutingResults — one per available key for a provider.
+ * Used by getFallbackChain to expand a single provider into N entries (one per key)
+ * so the existing for-loop in proxy.ts naturally rotates keys before falling back
+ * to the next provider.
+ *
+ * Returns at least 1 result if the provider has any usable key.
+ * Iterates pickConnection with excludeConnectionIds to enumerate all available keys.
+ */
+function buildAllRoutingResults(
+  provider: typeof providers.$inferSelect,
+  modelName: string,
+  maxKeysPerProvider = 3,
+): RoutingResult[] {
+  const results: RoutingResult[] = [];
+  const tried: string[] = [];
+  const strategy = (provider as { connectionStrategy?: string }).connectionStrategy ?? "priority";
+
+  // Try to get up to maxKeysPerProvider distinct connections
+  for (let i = 0; i < maxKeysPerProvider; i++) {
+    const picked = pickConnection(provider.id, strategy, tried);
+    if (!picked.key || !picked.connectionId) break;
+
+    results.push({
+      providerId: provider.id,
+      providerName: provider.name,
+      baseUrl: provider.baseUrl,
+      apiKey: picked.key.apiKey,
+      format: (provider as { format?: string }).format ?? "openai",
+      model: modelName,
+      connectionId: picked.connectionId,
+    });
+    tried.push(picked.connectionId);
+  }
+
+  // Fallback to provider-level single key (backward compatibility) if no multi-keys
+  if (results.length === 0 && provider.apiKey) {
+    results.push({
+      providerId: provider.id,
+      providerName: provider.name,
+      baseUrl: provider.baseUrl,
+      apiKey: safeDecryptApiKey(provider.apiKey),
+      format: (provider as { format?: string }).format ?? "openai",
+      model: modelName,
+      connectionId: null,
+    });
+  }
+
+  return results;
+}
+
 export function resolveModel(requestedModel: string): RoutingResult | null {
   logger.debug({ model: requestedModel }, "Resolving model");
 
@@ -297,8 +348,8 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
       // Strict model validation — same as resolveModel()
       const registeredModels: string[] = safeJsonParse<string[]>(providerByPrefix.models, []);
       if (registeredModels.includes(modelName)) {
-        const result = buildRoutingResult(providerByPrefix, modelName);
-        if (result) results.push(result);
+        // I4: Expand into multiple entries (one per key) for failover
+        results.push(...buildAllRoutingResults(providerByPrefix, modelName));
       }
       return results; // return even if empty — prefix matched, don't fall through to combo
     }
@@ -326,8 +377,8 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
       const provider = providerMap.get(entry.providerId);
 
       if (provider && provider.enabled) {
-        const result = buildRoutingResult(provider, entry.model);
-        if (result) results.push(result);
+        // I4: Expand into multiple entries (one per key) for failover
+        results.push(...buildAllRoutingResults(provider, entry.model));
       }
     }
   } else {
@@ -352,8 +403,8 @@ export function getFallbackChain(requestedModel: string): RoutingResult[] {
         const provider = providerMap.get(entry.providerId);
 
         if (provider && provider.enabled) {
-          const result = buildRoutingResult(provider, entry.model);
-          if (result) results.push(result);
+          // I4: Expand into multiple entries (one per key) for failover
+          results.push(...buildAllRoutingResults(provider, entry.model));
         }
       }
     } else {
@@ -405,6 +456,7 @@ export function logRequest(params: {
     providerId: params.providerId,
     comboId: params.comboId || null,
     apiKeyId: params.apiKeyId || null,
+    connectionId: params.connectionId || null,
     tokensIn: params.tokensIn || null,
     tokensOut: params.tokensOut || null,
     latencyMs: params.latencyMs,

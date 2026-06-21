@@ -9,6 +9,7 @@ import logger from "@/lib/logger";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { validateUrl } from "@/lib/ssrf-guard";
 
 // Re-export so existing call sites in route.ts keep working
 export type { ChatCompletionRequest };
@@ -240,6 +241,7 @@ export async function proxyWithFallback(
         logRequest({
           model: target.model,
           providerId: target.providerId,
+          connectionId: target.connectionId,
           apiKeyId: apiKeyId || null,
           latencyMs,
           status: "success",
@@ -253,8 +255,9 @@ export async function proxyWithFallback(
 
         logger.info({
           model: target.model,
-          provider: target.providerName,
           providerId: target.providerId,
+          connectionId: target.connectionId,
+          apiKeyId: apiKeyId || null,
           latencyMs,
           tokensIn,
           tokensOut,
@@ -277,6 +280,7 @@ export async function proxyWithFallback(
       logRequest({
         model: target.model,
         providerId: target.providerId,
+        connectionId: target.connectionId,
         apiKeyId: apiKeyId || null,
         latencyMs,
         status: "fallback",
@@ -288,8 +292,9 @@ export async function proxyWithFallback(
 
       logger.warn({
         model: target.model,
-        provider: target.providerName,
         providerId: target.providerId,
+        connectionId: target.connectionId,
+        apiKeyId: apiKeyId || null,
         status: response.status,
         latencyMs,
         error: lastError.message,
@@ -306,6 +311,7 @@ export async function proxyWithFallback(
       logRequest({
         model: target.model,
         providerId: target.providerId,
+        connectionId: target.connectionId,
         apiKeyId: apiKeyId || null,
         latencyMs,
         status: "error",
@@ -318,8 +324,9 @@ export async function proxyWithFallback(
       logger.error({
         err: lastError,
         model: target.model,
-        provider: target.providerName,
         providerId: target.providerId,
+        connectionId: target.connectionId,
+        apiKeyId: apiKeyId || null,
         latencyMs,
       }, "Proxy request error");
     }
@@ -382,6 +389,13 @@ async function forwardRequest(
     };
   }
 
+  // B4: SSRF guard at request time (defense-in-depth against DB compromise)
+  const ssrfCheck = await validateUrl(url);
+  if (!ssrfCheck.valid) {
+    logger.error({ url, error: ssrfCheck.error }, "SSRF guard blocked proxy request");
+    throw new Error(`SSRF protection: ${ssrfCheck.error}`);
+  }
+
   // Add timeout to prevent hanging requests
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000); // 60 seconds
@@ -398,69 +412,6 @@ async function forwardRequest(
   } finally {
     clearTimeout(timeout);
   }
-}
-
-/**
- * Detect if a target should use the official SDK instead of raw fetch.
- */
-function detectSdkType(target: RoutingResult): string | null {
-  const base = target.baseUrl.toLowerCase();
-  // Anthropic
-  if (base.includes("api.anthropic.com")) return "anthropic";
-  // OpenAI
-  if (base.includes("api.openai.com")) return "openai";
-  // OpenRouter
-  if (base.includes("openrouter.ai")) return "openrouter";
-  // DeepSeek
-  if (base.includes("api.deepseek.com")) return "deepseek";
-  // Google AI Studio (Gemini)
-  if (base.includes("generativelanguage.googleapis.com")) return "gemini";
-  // MiMo (OpenAI compatible)
-  if (base.includes("api.xiaomimimo.com")) return "mimo";
-  // Qwen (OpenAI compatible)
-  if (base.includes("dashscope-intl.aliyuncs.com")) return "qwen";
-  return null;
-}
-
-/**
- * Convert SDK result to a Response object.
- */
-function sdkResultToResponse(result: Awaited<ReturnType<typeof sdkCall>>): Response {
-  if (!result) throw new Error("SDK result is null");
-
-  if (result.type === "non-stream") {
-    return new Response(JSON.stringify(result.body), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "X-Wrouter-Usage-Source": "sdk",
-      },
-    });
-  }
-
-  // Streaming
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const chunk of result.stream) {
-          controller.enqueue(new TextEncoder().encode(chunk));
-        }
-        controller.close();
-      } catch (err) {
-        controller.error(err);
-      }
-    },
-  });
-
-  return new Response(stream, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "X-Wrouter-Usage-Source": "sdk",
-    },
-  });
 }
 
 /**
@@ -483,65 +434,10 @@ export async function proxyStreamWithFallback(
       // Notify UI that a request is starting on this provider
       notifyRequestStart(target.providerId, target.providerName, target.model);
 
-      // SDK adapter disabled — all providers use raw fetch for full response fidelity
-      if (false) {
-        const sdkResult: any = null;
-        if (sdkResult && sdkResult.type === "stream") {
-          // Convert SDK stream to ReadableStream
-          // Log AFTER stream fully consumed (usage resolves only after stream ends)
-          const readableStream = new ReadableStream({
-            async start(controller) {
-              try {
-                for await (const chunk of sdkResult.stream) {
-                  controller.enqueue(new TextEncoder().encode(chunk));
-                }
-                controller.close();
-              } catch (err) {
-                controller.error(err);
-              }
+      // SDK adapter removed — all providers use raw fetch for full response fidelity
+      // (preserves usage, cost, reasoning_tokens fields that some SDKs strip)
 
-              // Now stream is done — usage promise should resolve
-              const usageData = await sdkResult.usage;
-              let tokensIn: number | undefined;
-              let tokensOut: number | undefined;
-              let sdkProviderCost: number | null = null;
-              if (usageData) {
-                tokensIn = usageData.inputTokens;
-                tokensOut = usageData.outputTokens;
-                if (typeof usageData.cost === "number" && usageData.cost > 0) {
-                  sdkProviderCost = usageData.cost;
-                } else if (typeof usageData.totalCost === "number" && usageData.totalCost > 0) {
-                  sdkProviderCost = usageData.totalCost;
-                }
-              }
-
-              const totalDuration = Date.now() - startTime;
-              logRequest({
-                model: target.model,
-                providerId: target.providerId,
-                apiKeyId: apiKeyId || null,
-                latencyMs: totalDuration,
-                status: "success",
-                isStreaming: true,
-                tokensIn,
-                tokensOut,
-                requestDetail,
-                providerCost: sdkProviderCost,
-                responseDetail: JSON.stringify({
-                  stream: true,
-                  tokensIn,
-                  tokensOut,
-                  usageSource: "sdk",
-                }),
-              });
-            },
-          });
-
-          return { stream: readableStream, providerId: target.providerId };
-        }
-      }
-
-      // Fallback to raw fetch
+      // Raw fetch path
       const isAnthropic = target.format === "anthropic";
       const isGemini = target.baseUrl.includes("generativelanguage.googleapis.com");
 
@@ -550,7 +446,8 @@ export async function proxyStreamWithFallback(
         url = `${target.baseUrl.replace(/\/$/, "")}/messages`;
       } else if (isGemini) {
         const base = target.baseUrl.replace(/\/$/, "");
-        url = `${base}/models/${target.model}:streamGenerateContent?alt=sse&key=${target.apiKey}`;
+        // B1: Use x-goog-api-key header instead of URL query param to prevent key leakage in logs
+        url = `${base}/models/${encodeURIComponent(target.model)}:streamGenerateContent?alt=sse`;
       } else {
         url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
       }
@@ -576,7 +473,10 @@ export async function proxyStreamWithFallback(
             ...(requestBody.top_p !== undefined ? { topP: requestBody.top_p } : {}),
           },
         };
-        headers = { "Content-Type": "application/json" };
+        headers = {
+          "Content-Type": "application/json",
+          "x-goog-api-key": target.apiKey,
+        };
       } else if (isAnthropic) {
         const anthropicReq = openaiToAnthropicRequest({
           ...requestBody,
@@ -602,6 +502,13 @@ export async function proxyStreamWithFallback(
           "Content-Type": "application/json",
           Authorization: `Bearer ${target.apiKey}`,
         };
+      }
+
+      // B4: SSRF guard at request time (defense-in-depth)
+      const ssrfCheck = await validateUrl(url);
+      if (!ssrfCheck.valid) {
+        logger.error({ url, error: ssrfCheck.error }, "SSRF guard blocked streaming proxy request");
+        throw new Error(`SSRF protection: ${ssrfCheck.error}`);
       }
 
       // Add timeout for initial connection (5 minutes for streaming)
@@ -633,6 +540,7 @@ export async function proxyStreamWithFallback(
         logRequest({
           model: target.model,
           providerId: target.providerId,
+          connectionId: target.connectionId,
           apiKeyId: apiKeyId || null,
           latencyMs,
           status: "fallback",
@@ -643,8 +551,9 @@ export async function proxyStreamWithFallback(
         });
         logger.warn({
           model: target.model,
-          provider: target.providerName,
           providerId: target.providerId,
+          connectionId: target.connectionId,
+          apiKeyId: apiKeyId || null,
           status: response.status,
           latencyMs,
           stream: true,
@@ -764,9 +673,12 @@ export async function proxyStreamWithFallback(
                 if (sseBuffer.startsWith("data: ") && sseBuffer.trim() !== "data: [DONE]") {
                   try {
                     const json = JSON.parse(sseBuffer.slice(6));
-                    tryExtractUsage(json);
-                    accumulateDeltaContent(json);
-                  } catch { /* ignore */ }
+                                        tryExtractUsage(json);
+                                        accumulateDeltaContent(json);
+                                      } catch (e) {
+                                        // SSE chunk parse failed — log at debug level (not all chunks are JSON, e.g. [DONE])
+                                        logger.debug({ err: e instanceof Error ? e.message : String(e) }, "SSE chunk parse failed");
+                                      }
                 }
                 break;
               }
@@ -793,6 +705,22 @@ export async function proxyStreamWithFallback(
 
               streamController.enqueue(value);
             }
+          } catch (streamErr) {
+            // I2: Mid-stream error — record error so flaky providers/keys get penalized
+            // (this catches network drops, provider 5xx responses, abrupt connection close)
+            if (target.connectionId) {
+              try {
+                recordError(target.connectionId, 502);
+              } catch { /* don't let recordError failure break stream cleanup */ }
+            }
+            logger.warn({
+              err: streamErr instanceof Error ? streamErr.message : String(streamErr),
+              providerId: target.providerId,
+              connectionId: target.connectionId,
+              model: target.model,
+            }, "I2: mid-stream error — recorded error for connection");
+            // Re-throw so the consumer (client) sees the error
+            throw streamErr;
           } finally {
             _reader.releaseLock();
             _reader = null;
@@ -828,6 +756,9 @@ export async function proxyStreamWithFallback(
                   "\n\n";
                 try {
                   streamController.enqueue(new TextEncoder().encode(syntheticChunk));
+                  // I1: Always emit [DONE] terminator after synthetic chunk so OpenAI
+                  // clients (Cursor, Continue, etc.) don't hang waiting for end-of-stream
+                  streamController.enqueue(new TextEncoder().encode("data: [DONE]\n\n"));
                 } catch { /* stream may already be closed */ }
               } catch (err) {
                 logger.warn({ err }, "Token estimation fallback failed");
@@ -843,6 +774,7 @@ export async function proxyStreamWithFallback(
             logRequest({
               model: target.model,
               providerId: target.providerId,
+              connectionId: target.connectionId,
               apiKeyId: apiKeyId || null,
               latencyMs: totalDuration,
               status: "success",
@@ -864,8 +796,9 @@ export async function proxyStreamWithFallback(
             });
             logger.info({
               model: target.model,
-              provider: target.providerName,
               providerId: target.providerId,
+              connectionId: target.connectionId,
+              apiKeyId: apiKeyId || null,
               latencyMs: totalDuration,
               tokensIn,
               tokensOut,
@@ -892,6 +825,7 @@ export async function proxyStreamWithFallback(
       logRequest({
         model: target.model,
         providerId: target.providerId,
+        connectionId: target.connectionId,
         apiKeyId: apiKeyId || null,
         latencyMs,
         status: "error",
@@ -903,8 +837,9 @@ export async function proxyStreamWithFallback(
       logger.error({
         err: lastError,
         model: target.model,
-        provider: target.providerName,
         providerId: target.providerId,
+        connectionId: target.connectionId,
+        apiKeyId: apiKeyId || null,
         latencyMs,
         stream: true,
       }, "Stream proxy error");

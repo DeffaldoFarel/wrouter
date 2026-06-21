@@ -22,6 +22,7 @@ import {
   Shield,
   RefreshCw,
 } from "lucide-react";
+import { getOAuthProviderLabel } from "@/lib/constants/oauth-providers";
 
 interface OAuthFlowModalProps {
   open: boolean;
@@ -325,24 +326,10 @@ export function OAuthFlowModal({
     }
   };
 
-  const getProviderName = () => {
-    switch (provider) {
-      case "claude":
-        return "Claude Code";
-      case "codex":
-        return "OpenAI Codex";
-      case "github":
-        return "GitHub Copilot";
-      case "cursor":
-        return "Cursor";
-      case "kiro":
-        return "Kiro";
-      case "gemini-cli":
-        return "Gemini CLI";
-      default:
-        return provider || "Provider";
-    }
-  };
+  // Ambil nama tampilan provider dari konstanta bersama.
+  // Fallback ke string mentah / "Provider" kalau provider kosong.
+  const getProviderName = () =>
+    provider ? getOAuthProviderLabel(provider) : "Provider";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

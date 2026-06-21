@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { combos } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { verifySession } from "@/lib/auth/session";
+import { checkDashboardAuth } from "@/lib/auth/session";
+import { validateCombo } from "@/lib/validation";
 
 function checkAuth(req: NextRequest): boolean {
-  const token = req.cookies.get("session_token")?.value;
-  return !!token && verifySession(token);
+  return checkDashboardAuth(req) !== null;
 }
 
 export async function GET(
@@ -40,6 +40,15 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
+
+  const validation = validateCombo(body, true);
+  if (!validation.valid) {
+    return NextResponse.json(
+      { error: "Validation failed", errors: validation.errors },
+      { status: 400 }
+    );
+  }
+
   const { name, slug, models, enabled } = body;
 
   const existing = db.select().from(combos).where(eq(combos.id, id)).get();
@@ -49,12 +58,6 @@ export async function PUT(
 
   // If slug changed, check uniqueness
   if (slug && slug !== existing.slug) {
-    if (!/^[a-z0-9-]+$/.test(slug)) {
-      return NextResponse.json(
-        { error: "slug must be lowercase alphanumeric with hyphens only" },
-        { status: 400 }
-      );
-    }
     const slugExists = db.select().from(combos).where(eq(combos.slug, slug)).get();
     if (slugExists) {
       return NextResponse.json(

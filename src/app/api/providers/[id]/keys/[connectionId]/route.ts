@@ -4,6 +4,7 @@ import {
   deleteApiKeyConnection,
   toggleConnection,
 } from "@/lib/key-picker";
+import { checkDashboardAuth } from "@/lib/auth/session";
 
 /**
  * PUT /api/providers/[id]/keys/[connectionId]
@@ -13,6 +14,9 @@ export async function PUT(
   req: NextRequest,
   ctx: { params: Promise<{ id: string; connectionId: string }> }
 ) {
+  if (!checkDashboardAuth(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id: _providerId, connectionId } = await ctx.params;
   const body = await req.json();
 
@@ -35,6 +39,9 @@ export async function DELETE(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string; connectionId: string }> }
 ) {
+  if (!checkDashboardAuth(_req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id: _providerId, connectionId } = await ctx.params;
 
   try {
@@ -56,6 +63,9 @@ export async function PATCH(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string; connectionId: string }> }
 ) {
+  if (!checkDashboardAuth(_req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id: _providerId, connectionId } = await ctx.params;
 
   try {
