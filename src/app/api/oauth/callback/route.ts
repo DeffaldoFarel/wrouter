@@ -12,7 +12,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeTokens } from "@/lib/oauth/providers";
 import { createOrUpdateConnection } from "@/lib/oauth/connections";
-import { autoProvisionProvider } from "@/lib/oauth/auto-provision";
 import logger from "@/lib/logger";
 
 export async function GET(request: NextRequest) {
@@ -87,9 +86,6 @@ export async function GET(request: NextRequest) {
       { provider: "gemini-cli", connectionId: connection.id, email: connection.email },
       "OAuth callback: connection created"
     );
-
-    // Auto-provision: create provider if not exists + link connection
-    autoProvisionProvider("gemini-cli", connection.id);
 
     // Redirect to dashboard with success
     const redirectUrl = new URL("/dashboard/providers", request.url);
