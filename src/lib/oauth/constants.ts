@@ -96,7 +96,7 @@ export const KIRO_CONSTANTS = {
 
 export const GEMINI_CONFIG: OAuthConfig = {
   clientId:
-    process.env.GEMINI_OAUTH_CLIENT_ID || "",
+    process.env.GEMINI_OAUTH_CLIENT_ID || "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
   authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
   tokenEndpoint: "https://oauth2.googleapis.com/token",
   scopes: [
