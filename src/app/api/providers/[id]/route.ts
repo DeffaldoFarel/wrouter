@@ -65,9 +65,9 @@ export async function PUT(
   };
 
   // Validate format if provided
-  if (format !== undefined && !["openai", "anthropic", "gemini"].includes(format)) {
+  if (format !== undefined && !["openai", "anthropic", "gemini", "gemini-cli"].includes(format)) {
     return NextResponse.json(
-      { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', or 'gemini'.` },
+      { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', 'gemini', or 'gemini-cli'.` },
       { status: 400 }
     );
   }

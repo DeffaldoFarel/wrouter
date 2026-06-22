@@ -3,6 +3,7 @@ import { recordError } from "../key-picker";
 import { estimateInputTokens, estimateOutputTokens, MessageLike } from "./token-estimator";
 import { extractUsage, hasMeaningfulUsage, NormalizedUsage } from "./usage-extractor";
 import { openaiToAnthropicRequest, anthropicToOpenaiResponse, translateAnthropicStream } from "./translator/anthropic";
+import { translateGeminiCliStream } from "./translator/gemini-cli";
 import type { ChatCompletionRequest } from "./proxy-types";
 import { sdkCall } from "./sdk-adapter";
 import logger from "@/lib/logger";
@@ -176,7 +177,7 @@ export async function proxyWithFallback(
         }
 
         // For Gemini providers, translate response → OpenAI shape
-        if (target.baseUrl.includes("generativelanguage.googleapis.com") && parsedJson) {
+        if ((target.baseUrl.includes("generativelanguage.googleapis.com") || target.format === "gemini-cli") && parsedJson) {
           const candidates = (parsedJson.candidates as Array<Record<string, unknown>>) ?? [];
           const candidate = candidates[0];
           let textContent = "";
@@ -358,14 +359,53 @@ async function forwardRequest(
 
   // Fallback to raw fetch
   const isAnthropic = target.format === "anthropic";
-  const url = isAnthropic
-    ? `${target.baseUrl.replace(/\/$/, "")}/messages`
-    : `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const isGeminiCli = target.format === "gemini-cli";
+
+  let url: string;
+  if (isAnthropic) {
+    url = `${target.baseUrl.replace(/\/$/, "")}/messages`;
+  } else if (isGeminiCli) {
+    url = `${target.baseUrl.replace(/\/$/, "")}:generateContent`;
+  } else {
+    url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
+  }
 
   let forwardBody: unknown;
   let headers: Record<string, string>;
 
-  if (isAnthropic) {
+  if (isGeminiCli) {
+    // Gemini CLI OAuth: Cloud Code Assist API
+    // Wrap body in { project, model, request } envelope
+    const messages = (requestBody.messages ?? []) as Array<{ role: string; content: string }>;
+    const systemMsg = messages.find((m) => m.role === "system");
+    const chatMessages = messages.filter((m) => m.role !== "system");
+    const contents = chatMessages.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+    }));
+
+    const geminiRequest: Record<string, unknown> = {
+      contents,
+      ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
+      generationConfig: {
+        ...(requestBody.temperature !== undefined ? { temperature: requestBody.temperature } : {}),
+        ...(requestBody.max_tokens !== undefined ? { maxOutputTokens: requestBody.max_tokens } : {}),
+        ...(requestBody.top_p !== undefined ? { topP: requestBody.top_p } : {}),
+      },
+    };
+
+    forwardBody = {
+      project: target.projectId || "",
+      model: target.model,
+      request: geminiRequest,
+    };
+    headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${target.apiKey}`,
+      "User-Agent": `GeminiCLI/0.34.0/${target.model} (linux; x64; terminal)`,
+      "X-Goog-Api-Client": "google-genai-sdk/1.41.0 gl-node/v22.19.0",
+    };
+  } else if (isAnthropic) {
     const anthropicReq = openaiToAnthropicRequest({
       ...requestBody,
       model: target.model,
@@ -440,10 +480,13 @@ export async function proxyStreamWithFallback(
       // Raw fetch path
       const isAnthropic = target.format === "anthropic";
       const isGemini = target.baseUrl.includes("generativelanguage.googleapis.com");
+      const isGeminiCli = target.format === "gemini-cli";
 
       let url: string;
       if (isAnthropic) {
         url = `${target.baseUrl.replace(/\/$/, "")}/messages`;
+      } else if (isGeminiCli) {
+        url = `${target.baseUrl.replace(/\/$/, "")}:streamGenerateContent?alt=sse`;
       } else if (isGemini) {
         const base = target.baseUrl.replace(/\/$/, "");
         // B1: Use x-goog-api-key header instead of URL query param to prevent key leakage in logs
@@ -455,7 +498,38 @@ export async function proxyStreamWithFallback(
       let forwardBody: unknown;
       let headers: Record<string, string>;
 
-      if (isGemini) {
+      if (isGeminiCli) {
+        // Gemini CLI OAuth: Cloud Code Assist API (streaming)
+        const messages = (requestBody.messages ?? []) as Array<{ role: string; content: string }>;
+        const systemMsg = messages.find((m) => m.role === "system");
+        const chatMessages = messages.filter((m) => m.role !== "system");
+        const contents = chatMessages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }],
+        }));
+
+        const geminiRequest: Record<string, unknown> = {
+          contents,
+          ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
+          generationConfig: {
+            ...(requestBody.temperature !== undefined ? { temperature: requestBody.temperature } : {}),
+            ...(requestBody.max_tokens !== undefined ? { maxOutputTokens: requestBody.max_tokens } : {}),
+            ...(requestBody.top_p !== undefined ? { topP: requestBody.top_p } : {}),
+          },
+        };
+
+        forwardBody = {
+          project: target.projectId || "",
+          model: target.model,
+          request: geminiRequest,
+        };
+        headers = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${target.apiKey}`,
+          "User-Agent": `GeminiCLI/0.34.0/${target.model} (linux; x64; terminal)`,
+          "X-Goog-Api-Client": "google-genai-sdk/1.41.0 gl-node/v22.19.0",
+        };
+      } else if (isGemini) {
         // Convert OpenAI format → Gemini streaming format
         const messages = (requestBody.messages ?? []) as Array<{ role: string; content: string }>;
         const systemMsg = messages.find((m) => m.role === "system");
@@ -589,7 +663,9 @@ export async function proxyStreamWithFallback(
       // (mirroring `stream_options.include_usage`), so downstream code can stay format-agnostic.
       const originalStream = isAnthropic
         ? translateAnthropicStream(response.body)
-        : response.body;
+        : isGeminiCli || isGemini
+          ? translateGeminiCliStream(response.body)
+          : response.body;
       let tokensIn: number | undefined = undefined;
       let tokensOut: number | undefined = undefined;
       let usageFromUpstream = false;

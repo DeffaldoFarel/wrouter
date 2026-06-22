@@ -3,9 +3,9 @@
   "version": "1.7.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 2002",
+    "dev": "next dev --port 2001",
     "build": "next build",
-    "start": "next start --port 2002",
+    "start": "next start --port 2001",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",

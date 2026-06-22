@@ -48,12 +48,13 @@ export async function POST(req: NextRequest) {
     let { format } = body as { format?: string };
     if (!format) {
       if (baseUrl.includes("anthropic.com")) format = "anthropic";
+      else if (baseUrl.includes("cloudcode-pa.googleapis.com")) format = "gemini-cli";
       else if (baseUrl.includes("generativelanguage.googleapis.com")) format = "gemini";
       else format = "openai";
     }
-    if (!["openai", "anthropic", "gemini"].includes(format)) {
+    if (!["openai", "anthropic", "gemini", "gemini-cli"].includes(format)) {
       return NextResponse.json(
-        { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', or 'gemini'.` },
+        { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', 'gemini', or 'gemini-cli'.` },
         { status: 400 }
       );
     }

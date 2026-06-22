@@ -6,7 +6,7 @@
  *   "round-robin" → least recently used among available connections
  *   "random"      → random pick among available connections
  *
- * On failure: track error, auto-disable after maxErrors, 429 → immediate skip.
+ * On failure: track error (display only, no auto-blocking), 429 → temporary rate-limit skip.
  *
  * Inspired by GenflowAi/9router connection picker.
  */
@@ -24,6 +24,7 @@ export interface SelectedKey {
   connectionId: string;
   apiKey: string;
   providerId: string;
+  projectId?: string | null;
 }
 
 export interface KeyPickResult {
@@ -73,9 +74,11 @@ function isRateLimited(conn: typeof providerConnections.$inferSelect): boolean {
 
 /**
  * Check if a connection has exceeded its error threshold.
+ * @deprecated Error-based auto-blocking is disabled. This function now always returns false.
+ * Error counts are still tracked for monitoring purposes only.
  */
-function isDisabledByErrors(conn: typeof providerConnections.$inferSelect): boolean {
-  return conn.errorCount >= conn.maxErrors;
+function isDisabledByErrors(_conn: typeof providerConnections.$inferSelect): boolean {
+  return false;
 }
 
 /**
@@ -101,8 +104,6 @@ function getAvailableConnections(
       isNull(providerConnections.rateLimitedUntil),
       lte(providerConnections.rateLimitedUntil, now),
     ),
-    // Not disabled by errors
-    lt(providerConnections.errorCount, providerConnections.maxErrors),
   ];
 
   if (excludes.length > 0) {
@@ -173,20 +174,30 @@ export function pickConnection(
   // Extract API key from the data JSON blob
   const data = JSON.parse(selected.data || "{}");
   const encryptedKey = data.apiKey as string | undefined;
-  if (!encryptedKey) {
-    return { key: null, connectionId: null, reason: "Connection has no API key" };
-  }
+  const accessToken = data.accessToken as string | undefined;
 
-  const apiKey = safeDecryptApiKey(encryptedKey);
+  // OAuth connections store accessToken; API key connections store apiKey
+  let apiKey: string;
+  if (encryptedKey) {
+    apiKey = safeDecryptApiKey(encryptedKey);
+  } else if (accessToken) {
+    apiKey = accessToken;
+  } else {
+    return { key: null, connectionId: null, reason: "Connection has no API key or access token" };
+  }
 
   // Record usage
   recordUsage(selected.id);
+
+  // Extract projectId for Gemini CLI OAuth connections
+  const projectId = data.projectId as string | undefined;
 
   return {
     key: {
       connectionId: selected.id,
       apiKey,
       providerId,
+      projectId: projectId || null,
     },
     connectionId: selected.id,
     reason: null,

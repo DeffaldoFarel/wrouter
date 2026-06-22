@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,7 +34,10 @@ import {
   Box,
   Shield,
 } from "lucide-react";
-import { KNOWN_API_KEY_PROVIDERS, type KnownApiKeyProvider } from "@/lib/constants/providers";
+import {
+  KNOWN_API_KEY_PROVIDERS,
+  type KnownApiKeyProvider,
+} from "@/lib/constants/providers";
 import {
   KNOWN_OAUTH_PROVIDERS,
   type KnownOAuthProvider,
@@ -108,7 +112,10 @@ function BrandIcon({
       <div
         className={`flex items-center justify-center rounded-md shrink-0 bg-muted/50 border ${sizes[size].box}`}
       >
-        <ProviderIcon prefix={prefix} size={size === "sm" ? 16 : size === "md" ? 20 : 24} />
+        <ProviderIcon
+          prefix={prefix}
+          size={size === "sm" ? 16 : size === "md" ? 20 : 24}
+        />
       </div>
     );
   }
@@ -144,7 +151,10 @@ function BrandIcon({
 function HealthBadge({ health }: { health?: HealthResult }) {
   if (!health || health.status === "unknown") {
     return (
-      <Badge variant="outline" className="text-[10px] gap-1 h-5 px-1.5 text-muted-foreground">
+      <Badge
+        variant="outline"
+        className="text-[10px] gap-1 h-5 px-1.5 text-muted-foreground"
+      >
         <Clock className="h-2.5 w-2.5" />
         Not checked
       </Badge>
@@ -200,9 +210,7 @@ function ApiKeyProviderSlot({
   onCheckHealth: (id: string) => void;
   onConnect: (prefix: string) => void;
 }) {
-  const href = connected
-    ? `/dashboard/providers/${connected.id}`
-    : undefined;
+  const href = connected ? `/dashboard/providers/${connected.id}` : undefined;
 
   const health = connected ? healthMap[connected.id] : undefined;
 
@@ -216,10 +224,20 @@ function ApiKeyProviderSlot({
         {/* Header: brand icon + name + (toggle | not-set-up) */}
         <div className="flex items-start justify-between gap-2">
           {connected ? (
-            <Link href={href!} className="flex items-start gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity">
-              <BrandIcon prefix={known.prefix} brandColor={known.brandColor} label={known.iconLabel} size="md" />
+            <Link
+              href={href!}
+              className="flex items-start gap-3 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+            >
+              <BrandIcon
+                prefix={known.prefix}
+                brandColor={known.brandColor}
+                label={known.iconLabel}
+                size="md"
+              />
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-sm leading-tight truncate">{known.name}</p>
+                <p className="font-semibold text-sm leading-tight truncate">
+                  {known.name}
+                </p>
                 <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
                   {known.prefix}/
                 </p>
@@ -227,9 +245,16 @@ function ApiKeyProviderSlot({
             </Link>
           ) : (
             <div className="flex items-start gap-3 min-w-0 flex-1">
-              <BrandIcon prefix={known.prefix} brandColor={known.brandColor} label={known.iconLabel} size="md" />
+              <BrandIcon
+                prefix={known.prefix}
+                brandColor={known.brandColor}
+                label={known.iconLabel}
+                size="md"
+              />
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-sm leading-tight truncate">{known.name}</p>
+                <p className="font-semibold text-sm leading-tight truncate">
+                  {known.name}
+                </p>
                 <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
                   {known.prefix}/
                 </p>
@@ -255,7 +280,10 @@ function ApiKeyProviderSlot({
 
         {/* Description */}
         {connected ? (
-          <Link href={href!} className="block hover:opacity-80 transition-opacity">
+          <Link
+            href={href!}
+            className="block hover:opacity-80 transition-opacity"
+          >
             <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
               {known.description}
             </p>
@@ -272,7 +300,8 @@ function ApiKeyProviderSlot({
             <div className="flex items-center gap-1.5 flex-wrap">
               <HealthBadge health={health} />
               <span className="text-[10px] text-muted-foreground">
-                {connected.models.length} model{connected.models.length !== 1 ? "s" : ""}
+                {connected.models.length} model
+                {connected.models.length !== 1 ? "s" : ""}
               </span>
             </div>
             <button
@@ -335,7 +364,9 @@ function ProviderCard({
           >
             <BrandIcon prefix={provider.prefix} size="md" />
             <div className="min-w-0 flex-1">
-              <p className="font-semibold text-sm leading-tight truncate">{provider.name}</p>
+              <p className="font-semibold text-sm leading-tight truncate">
+                {provider.name}
+              </p>
               <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
                 {provider.prefix}/
               </p>
@@ -365,7 +396,8 @@ function ProviderCard({
           <div className="flex items-center gap-1.5 flex-wrap">
             <HealthBadge health={health} />
             <span className="text-[10px] text-muted-foreground">
-              {provider.models.length} model{provider.models.length !== 1 ? "s" : ""}
+              {provider.models.length} model
+              {provider.models.length !== 1 ? "s" : ""}
             </span>
           </div>
           <button
@@ -379,7 +411,9 @@ function ProviderCard({
             title="Check health"
             disabled={health?.status === "checking"}
           >
-            <RefreshCw className={`h-3 w-3 ${health?.status === "checking" ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`h-3 w-3 ${health?.status === "checking" ? "animate-spin" : ""}`}
+            />
             <span className="hidden sm:inline">Check</span>
           </button>
         </div>
@@ -419,8 +453,12 @@ function StatCard({
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">
               {label}
             </p>
-            <p className={`text-2xl font-bold tabular-nums ${accentClass}`}>{value}</p>
-            {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+            <p className={`text-2xl font-bold tabular-nums ${accentClass}`}>
+              {value}
+            </p>
+            {hint && (
+              <p className="text-[10px] text-muted-foreground">{hint}</p>
+            )}
           </div>
           <div className={`rounded-md bg-muted p-2 ${accentClass}`}>
             <Icon className="h-4 w-4" />
@@ -470,40 +508,51 @@ function ProvidersSkeleton() {
 // ─────────────────────────────────────────────
 
 export default function ProvidersPage() {
+  const router = useRouter();
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [healthMap, setHealthMap] = useState<Record<string, HealthResult>>(() => {
-    try {
-      const cached = localStorage.getItem("wrouter:health-cache");
-      if (cached) {
-        const parsed: Record<string, HealthResult> = JSON.parse(cached);
-        const FRESH_TTL = 30 * 60 * 1000;
-        const now = Date.now();
-        const fresh: Record<string, HealthResult> = {};
-        for (const [id, result] of Object.entries(parsed)) {
-          if (result.checkedAt && now - result.checkedAt < FRESH_TTL) {
-            fresh[id] = result;
+  const [healthMap, setHealthMap] = useState<Record<string, HealthResult>>(
+    () => {
+      try {
+        const cached = localStorage.getItem("wrouter:health-cache");
+        if (cached) {
+          const parsed: Record<string, HealthResult> = JSON.parse(cached);
+          const FRESH_TTL = 30 * 60 * 1000;
+          const now = Date.now();
+          const fresh: Record<string, HealthResult> = {};
+          for (const [id, result] of Object.entries(parsed)) {
+            if (result.checkedAt && now - result.checkedAt < FRESH_TTL) {
+              fresh[id] = result;
+            }
+          }
+          if (Object.keys(fresh).length > 0) {
+            return fresh;
           }
         }
-        if (Object.keys(fresh).length > 0) {
-          return fresh;
-        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    }
-    return {};
-  });
+      return {};
+    },
+  );
   const [checkingAll, setCheckingAll] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [oauthOpen, setOauthOpen] = useState(false);
-  const [oauthConnections, setOauthConnections] = useState<OAuthConnection[]>([]);
-  const [oauthSelectedProvider, setOauthSelectedProvider] = useState<string | null>(null);
+  const [oauthConnections, setOauthConnections] = useState<OAuthConnection[]>(
+    [],
+  );
+  const [oauthSelectedProvider, setOauthSelectedProvider] = useState<
+    string | null
+  >(null);
   const [oauthFlowOpen, setOauthFlowOpen] = useState(false);
-  const [oauthFlowProvider, setOauthFlowProvider] = useState<string | null>(null);
+  const [oauthFlowProvider, setOauthFlowProvider] = useState<string | null>(
+    null,
+  );
   const [apiKeySetupOpen, setApiKeySetupOpen] = useState(false);
-  const [apiKeySetupPrefix, setApiKeySetupPrefix] = useState<string | null>(null);
+  const [apiKeySetupPrefix, setApiKeySetupPrefix] = useState<string | null>(
+    null,
+  );
   const [apiKeySetupValue, setApiKeySetupValue] = useState("");
 
   // Form state
@@ -511,7 +560,6 @@ export default function ProvidersPage() {
   const [prefix, setPrefix] = useState("");
   const [format, setFormat] = useState<"openai" | "anthropic">("openai");
   const [baseUrl, setBaseUrl] = useState("");
-
 
   const fetchProviders = useCallback(async () => {
     try {
@@ -555,7 +603,9 @@ export default function ProvidersPage() {
       }
     })();
     fetchOAuthConnections();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [fetchOAuthConnections]);
 
   const checkHealth = useCallback(async (providerId: string) => {
@@ -577,7 +627,9 @@ export default function ProvidersPage() {
 
       // Persist to localStorage
       try {
-        const cache = JSON.parse(localStorage.getItem("wrouter:health-cache") || "{}");
+        const cache = JSON.parse(
+          localStorage.getItem("wrouter:health-cache") || "{}",
+        );
         cache[providerId] = result;
         localStorage.setItem("wrouter:health-cache", JSON.stringify(cache));
       } catch {
@@ -597,7 +649,9 @@ export default function ProvidersPage() {
 
   const checkAllHealth = useCallback(async () => {
     setCheckingAll(true);
-    await Promise.all(providers.filter((p) => p.enabled).map((p) => checkHealth(p.id)));
+    await Promise.all(
+      providers.filter((p) => p.enabled).map((p) => checkHealth(p.id)),
+    );
     setCheckingAll(false);
     toast.success("Health check complete");
   }, [providers, checkHealth]);
@@ -642,7 +696,7 @@ export default function ProvidersPage() {
       });
       if (res.ok) {
         setProviders((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, enabled } : p))
+          prev.map((p) => (p.id === id ? { ...p, enabled } : p)),
         );
         toast.success(enabled ? "Provider enabled" : "Provider disabled");
       } else {
@@ -656,7 +710,7 @@ export default function ProvidersPage() {
   // ─── Derived data ───
   const customProviders = useMemo(
     () => providers.filter((p) => p.type !== "apikey"),
-    [providers]
+    [providers],
   );
 
   const totalActive = providers.filter((p) => p.enabled).length;
@@ -682,7 +736,7 @@ export default function ProvidersPage() {
       (k) =>
         k.name.toLowerCase().includes(q) ||
         k.prefix.toLowerCase().includes(q) ||
-        k.description.toLowerCase().includes(q)
+        k.description.toLowerCase().includes(q),
     );
   }, [searchQuery]);
 
@@ -694,7 +748,7 @@ export default function ProvidersPage() {
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.prefix.toLowerCase().includes(q) ||
-        p.baseUrl.toLowerCase().includes(q)
+        p.baseUrl.toLowerCase().includes(q),
     );
   }, [customProviders, searchQuery]);
 
@@ -719,7 +773,9 @@ export default function ProvidersPage() {
               disabled={checkingAll}
               className="gap-2"
             >
-              <RefreshCw className={`h-4 w-4 ${checkingAll ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`h-4 w-4 ${checkingAll ? "animate-spin" : ""}`}
+              />
               {checkingAll ? "Checking..." : "Check All"}
             </Button>
           )}
@@ -730,7 +786,9 @@ export default function ProvidersPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {format === "anthropic" ? "Add Anthropic Compatible" : "Add OpenAI Compatible"}
+              {format === "anthropic"
+                ? "Add Anthropic Compatible"
+                : "Add OpenAI Compatible"}
             </DialogTitle>
             <p className="text-sm text-muted-foreground mt-1">
               {format === "anthropic"
@@ -738,58 +796,60 @@ export default function ProvidersPage() {
                 : "Connect an OpenAI-compatible endpoint (/v1/chat/completions)"}
             </p>
           </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Name</Label>
-                  <Input
-                    id="name"
-                    placeholder="e.g. Groq, Together AI, Local LLM"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="prefix">Prefix</Label>
-                  <Input
-                    id="prefix"
-                    placeholder="e.g. groq, together, local"
-                    value={prefix}
-                    onChange={(e) =>
-                      setPrefix(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
-                    }
-                    required
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Used to call models:{" "}
-                    <code className="bg-muted px-1 py-0.5 rounded">
-                      {prefix || "prefix"}/model-name
-                    </code>
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="baseUrl">Base URL</Label>
-                  <Input
-                    id="baseUrl"
-                    placeholder="https://api.example.com/v1"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setDialogOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit">Add Provider</Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Name</Label>
+              <Input
+                id="name"
+                placeholder="e.g. Groq, Together AI, Local LLM"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="prefix">Prefix</Label>
+              <Input
+                id="prefix"
+                placeholder="e.g. groq, together, local"
+                value={prefix}
+                onChange={(e) =>
+                  setPrefix(
+                    e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
+                  )
+                }
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                Used to call models:{" "}
+                <code className="bg-muted px-1 py-0.5 rounded">
+                  {prefix || "prefix"}/model-name
+                </code>
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="baseUrl">Base URL</Label>
+              <Input
+                id="baseUrl"
+                placeholder="https://api.example.com/v1"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit">Add Provider</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* ═══ Stats Overview ═══ */}
       {providers.length > 0 && (
@@ -815,7 +875,9 @@ export default function ProvidersPage() {
             icon={AlertCircle}
             label="Issues"
             value={healthStats.offline}
-            hint={healthStats.offline === 0 ? "All systems good" : "Need attention"}
+            hint={
+              healthStats.offline === 0 ? "All systems good" : "Need attention"
+            }
             accent={healthStats.offline > 0 ? "warning" : "default"}
           />
           <StatCard
@@ -897,8 +959,8 @@ export default function ProvidersPage() {
               <div className="space-y-1">
                 <p className="text-sm font-medium">No custom providers yet</p>
                 <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                  Add any OpenAI-compatible endpoint like Groq, Together AI, or your own
-                  local LLM server.
+                  Add any OpenAI-compatible endpoint like Groq, Together AI, or
+                  your own local LLM server.
                 </p>
               </div>
             </CardContent>
@@ -939,17 +1001,52 @@ export default function ProvidersPage() {
         <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {KNOWN_OAUTH_PROVIDERS.map((oauthProvider) => {
             const connections = oauthConnections.filter(
-              (c) => c.provider === oauthProvider.id
+              (c) => c.provider === oauthProvider.id,
             );
             const activeConnection = connections.find((c) => c.isActive);
             const hasConnection = connections.length > 0;
 
+            // Find matching provider in DB (auto-provisioned or manually created)
+            const linkedProvider = providers.find(
+              (p) =>
+                p.prefix === oauthProvider.prefix ||
+                p.prefix === oauthProvider.id,
+            );
+
             return (
               <Card
                 key={oauthProvider.id}
-                className={`group transition-all hover:shadow-md hover:border-primary/40 ${
+                className={`group transition-all hover:shadow-md hover:border-primary/40 cursor-pointer ${
                   !hasConnection ? "border-dashed" : ""
                 }`}
+                onClick={async () => {
+                  if (linkedProvider) {
+                    // Provider exists in DB → navigate to detail
+                    router.push(`/dashboard/providers/${linkedProvider.id}`);
+                  } else {
+                    // Auto-provision and navigate
+                    try {
+                      const res = await fetch(`/api/oauth/auto-provision`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ provider: oauthProvider.id }),
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        router.push(`/dashboard/providers/${data.providerId}`);
+                      } else {
+                        // Fallback: navigate to setup page
+                        router.push(
+                          `/dashboard/providers/setup/${oauthProvider.prefix}`,
+                        );
+                      }
+                    } catch {
+                      router.push(
+                        `/dashboard/providers/setup/${oauthProvider.prefix}`,
+                      );
+                    }
+                  }
+                }}
               >
                 <CardContent className="space-y-3">
                   {/* Header: brand icon + name + status */}
@@ -970,17 +1067,33 @@ export default function ProvidersPage() {
                     <div className="shrink-0">
                       {hasConnection ? (
                         <Badge
-                          variant={activeConnection?.testStatus === "active" ? "default" : "secondary"}
+                          variant={
+                            activeConnection?.testStatus === "active"
+                              ? "default"
+                              : "secondary"
+                          }
                           className="text-[10px]"
                         >
                           {activeConnection?.testStatus === "active" ? (
-                            <><CheckCircle2 className="h-3 w-3 mr-1" />Connected</>
+                            <>
+                              <CheckCircle2 className="h-3 w-3 mr-1" />
+                              Connected
+                            </>
                           ) : activeConnection?.testStatus === "error" ? (
-                            <><XCircle className="h-3 w-3 mr-1" />Error</>
+                            <>
+                              <XCircle className="h-3 w-3 mr-1" />
+                              Error
+                            </>
                           ) : activeConnection?.testStatus === "expired" ? (
-                            <><Clock className="h-3 w-3 mr-1" />Expired</>
+                            <>
+                              <Clock className="h-3 w-3 mr-1" />
+                              Expired
+                            </>
                           ) : (
-                            <><AlertCircle className="h-3 w-3 mr-1" />Untested</>
+                            <>
+                              <AlertCircle className="h-3 w-3 mr-1" />
+                              Untested
+                            </>
                           )}
                         </Badge>
                       ) : (
@@ -1000,7 +1113,8 @@ export default function ProvidersPage() {
                   {hasConnection ? (
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[10px] text-muted-foreground">
-                        {connections.length} connection{connections.length !== 1 ? "s" : ""}
+                        {connections.length} connection
+                        {connections.length !== 1 ? "s" : ""}
                       </span>
                       <Button
                         variant="ghost"
@@ -1033,13 +1147,17 @@ export default function ProvidersPage() {
             );
           })}
         </div>
-        <OAuthConnectionManager open={oauthOpen} onOpenChange={(open) => {
-          setOauthOpen(open);
-          if (!open) {
-            setOauthSelectedProvider(null);
-            fetchOAuthConnections();
-          }
-        }} filterProvider={oauthSelectedProvider} />
+        <OAuthConnectionManager
+          open={oauthOpen}
+          onOpenChange={(open) => {
+            setOauthOpen(open);
+            if (!open) {
+              setOauthSelectedProvider(null);
+              fetchOAuthConnections();
+            }
+          }}
+          filterProvider={oauthSelectedProvider}
+        />
         <OAuthFlowModal
           open={oauthFlowOpen}
           onOpenChange={setOauthFlowOpen}
@@ -1072,9 +1190,10 @@ export default function ProvidersPage() {
           <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {filteredKnown.map((known) => {
               const connected =
-                providers.find((p) =>
-                  (p.name === known.name && p.type === "apikey") ||
-                  p.baseUrl === known.baseUrl
+                providers.find(
+                  (p) =>
+                    (p.name === known.name && p.type === "apikey") ||
+                    p.baseUrl === known.baseUrl,
                 ) ?? null;
               return (
                 <ApiKeyProviderSlot
@@ -1123,40 +1242,60 @@ export default function ProvidersPage() {
       </div>
 
       {/* ═══ API Key Setup Modal ═══ */}
-      <Dialog open={apiKeySetupOpen} onOpenChange={(open) => {
-        setApiKeySetupOpen(open);
-        if (!open) {
-          setApiKeySetupPrefix(null);
-          setApiKeySetupValue("");
-        }
-      }}>
+      <Dialog
+        open={apiKeySetupOpen}
+        onOpenChange={(open) => {
+          setApiKeySetupOpen(open);
+          if (!open) {
+            setApiKeySetupPrefix(null);
+            setApiKeySetupValue("");
+          }
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-5 w-5" />
-              Connect {KNOWN_API_KEY_PROVIDERS.find((p) => p.prefix === apiKeySetupPrefix)?.name || "Provider"}
+              Connect{" "}
+              {KNOWN_API_KEY_PROVIDERS.find(
+                (p) => p.prefix === apiKeySetupPrefix,
+              )?.name || "Provider"}
             </DialogTitle>
           </DialogHeader>
           {(() => {
-            const setupProvider = KNOWN_API_KEY_PROVIDERS.find((p) => p.prefix === apiKeySetupPrefix);
+            const setupProvider = KNOWN_API_KEY_PROVIDERS.find(
+              (p) => p.prefix === apiKeySetupPrefix,
+            );
             if (!setupProvider) return null;
             return (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Enter your API key to start routing requests through {setupProvider.name}.
+                  Enter your API key to start routing requests through{" "}
+                  {setupProvider.name}.
                 </p>
                 <div className="space-y-3 text-sm">
                   <div className="flex items-center justify-between p-2 rounded-md bg-muted/30 border">
-                    <span className="text-xs text-muted-foreground">BASE URL</span>
-                    <code className="text-xs font-mono truncate max-w-[200px]">{setupProvider.baseUrl}</code>
+                    <span className="text-xs text-muted-foreground">
+                      BASE URL
+                    </span>
+                    <code className="text-xs font-mono truncate max-w-50">
+                      {setupProvider.baseUrl}
+                    </code>
                   </div>
                   <div className="flex items-center justify-between p-2 rounded-md bg-muted/30 border">
-                    <span className="text-xs text-muted-foreground">PREFIX</span>
-                    <code className="text-xs font-mono">{setupProvider.prefix}/</code>
+                    <span className="text-xs text-muted-foreground">
+                      PREFIX
+                    </span>
+                    <code className="text-xs font-mono">
+                      {setupProvider.prefix}/
+                    </code>
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="apikey-input" className="flex items-center gap-2">
+                  <Label
+                    htmlFor="apikey-input"
+                    className="flex items-center gap-2"
+                  >
                     <KeyRound className="h-3.5 w-3.5" />
                     API Key
                   </Label>
@@ -1180,7 +1319,10 @@ export default function ProvidersPage() {
                   )}
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setApiKeySetupOpen(false)}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setApiKeySetupOpen(false)}
+                  >
                     Cancel
                   </Button>
                   <Button
@@ -1208,7 +1350,11 @@ export default function ProvidersPage() {
                         setApiKeySetupValue("");
                         fetchProviders();
                       } catch (err) {
-                        toast.error(err instanceof Error ? err.message : "Failed to connect");
+                        toast.error(
+                          err instanceof Error
+                            ? err.message
+                            : "Failed to connect",
+                        );
                       }
                     }}
                   >
