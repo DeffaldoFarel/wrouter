@@ -7,12 +7,6 @@
 import type { SVGProps } from "react";
 
 // ─── @lobehub/icons imports (Color variants) ───
-import ClaudeCode from "@lobehub/icons/es/ClaudeCode";
-import Codex from "@lobehub/icons/es/Codex";
-import GithubCopilot from "@lobehub/icons/es/GithubCopilot";
-import CursorIcon from "@lobehub/icons/es/Cursor";
-import KiroIcon from "@lobehub/icons/es/Kiro";
-import GeminiCLI from "@lobehub/icons/es/GeminiCLI";
 import OpenRouterIcons from "@lobehub/icons/es/OpenRouter";
 import DeepSeekIcons from "@lobehub/icons/es/DeepSeek";
 import OpenAI from "@lobehub/icons/es/OpenAI";
@@ -83,13 +77,6 @@ interface IconEntry {
 }
 
 const ICON_REGISTRY: Record<string, IconEntry> = {
-  // OAuth Providers
-  claude: { icon: ClaudeCode, label: "Claude Code" },
-  codex: { icon: Codex, label: "OpenAI Codex" },
-  github: { icon: GithubCopilot, label: "GitHub Copilot" },
-  cursor: { icon: CursorIcon, label: "Cursor" },
-  kiro: { icon: KiroIcon, label: "Kiro" },
-  "gemini-cli": { icon: GeminiCLI, label: "Gemini CLI" },
   // API Key Providers
   openrouter: { icon: OpenRouterIcons, label: "OpenRouter" },
   deepseek: { icon: DeepSeekIcons, label: "DeepSeek" },
