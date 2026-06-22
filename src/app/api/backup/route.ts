@@ -24,90 +24,29 @@ export async function GET(req: NextRequest) {
     const Database = (await import("better-sqlite3")).default;
 
     if (slim) {
-      // J6: Slim backup — exclude request_logs (usually 90%+ of DB size).
+      // Slim backup — exclude request_logs (usually 90%+ of DB size).
       //
-      // Old approach was: source.backup() → DELETE FROM request_logs → VACUUM.
-      // VACUUM blocks the Node event loop for 30-120s on a 1.2GB DB, freezing
-      // the entire HTTP server while the backup runs.
+      // FIX: Previously used ATTACH + INSERT INTO SELECT with schema from
+      // sqlite_master. This was BROKEN because ALTER TABLE ADD COLUMN (runtime
+      // migrations in index.ts) doesn't update sqlite_master — only the table
+      // itself. The backup recreated tables with OLD schemas (missing columns
+      // like prefix, connection_strategy, allowed_models, etc.), causing crashes
+      // after restore.
       //
-      // New approach: ATTACH source + INSERT INTO SELECT into a fresh empty DB.
-      // Since the new file starts empty and we skip request_logs entirely, the
-      // resulting DB is already minimal — no VACUUM needed. Total work is only
-      // proportional to the data we *keep* (settings, providers, keys, etc.),
-      // not the full 1.2GB.
-      //
-      // This still does CPU work synchronously inside better-sqlite3 (it's a
-      // C addon, not async I/O), but the work scales with the small kept-data
-      // set, not the full DB — typically <1s instead of 30-120s.
+      // New approach: source.backup() copies pages 1:1 (100% schema-correct),
+      // then we DELETE request_logs from the temp copy. No VACUUM needed —
+      // the DELETE is fast and the file remains a valid SQLite database.
+      const source = new Database(dbPath, { readonly: true });
+      try {
+        await source.backup(tempPath);
+      } finally {
+        source.close();
+      }
+
+      // Delete request_logs from the copy (makes it "slim")
       const temp = new Database(tempPath);
       try {
-        // Speed: temp is a throwaway file we'll stream out and delete. Skip
-        // journaling and fsync entirely — durability doesn't matter here.
-        temp.pragma("journal_mode = OFF");
-        temp.pragma("synchronous = OFF");
-
-        // ATTACH the source DB. We never write to it (only INSERT ... FROM src),
-        // and the main app uses WAL mode so concurrent readers don't block writers.
-        // SQLite ATTACH doesn't accept bind parameters — escape single quotes in path.
-        const escapedSourcePath = dbPath.replace(/'/g, "''");
-        temp.exec(`ATTACH DATABASE '${escapedSourcePath}' AS src`);
-
-        // Enumerate schema objects actually present in source. We can't rely on
-        // schema.ts alone because index.ts adds tables/indexes via runtime
-        // migrations that may or may not have run on this particular DB.
-        //
-        // Filters:
-        //   sql IS NOT NULL          → skip auto-indexes (sqlite_autoindex_*)
-        //   tbl_name != 'request_logs' → drop the big table AND its indexes/triggers
-        //   name NOT LIKE 'sqlite_%' → skip internal SQLite metadata
-        const objects = temp.prepare(
-          `SELECT type, name, tbl_name, sql FROM src.sqlite_master
-           WHERE sql IS NOT NULL
-             AND tbl_name != 'request_logs'
-             AND name NOT LIKE 'sqlite_%'`
-        ).all() as Array<{ type: string; name: string; tbl_name: string; sql: string }>;
-
-        const tables = objects.filter((o) => o.type === "table");
-        const nonTables = objects.filter((o) => o.type !== "table"); // index, trigger, view
-
-        // Single transaction for DDL + bulk inserts: turns N fsyncs into ~0
-        // (we already disabled journaling, but keeping the txn is still faster
-        // because SQLite batches page writes in memory).
-        temp.exec("BEGIN");
-        try {
-          // 1. Recreate every table in the new DB. The CREATE TABLE statements
-          //    we read from sqlite_master have no schema prefix, so they target
-          //    `main` (the temp DB) by default — exactly what we want.
-          for (const t of tables) {
-            temp.exec(t.sql);
-          }
-
-          // 2. Copy data. INSERT INTO main.<t> SELECT * FROM src.<t> works
-          //    because the schemas are identical (we just CREATE'd from the
-          //    same DDL). request_logs is absent from `tables`, so it's skipped.
-          for (const t of tables) {
-            const q = t.name.replace(/"/g, '""'); // quote-safe identifier
-            temp.exec(`INSERT INTO main."${q}" SELECT * FROM src."${q}"`);
-          }
-
-          // 3. Recreate indexes/triggers/views AFTER bulk load — much faster
-          //    than maintaining indexes during inserts.
-          for (const o of nonTables) {
-            try {
-              temp.exec(o.sql);
-            } catch {
-              // An index/trigger may fail if its parent constraint already
-              // implicitly created it (e.g. UNIQUE on a column). Safe to skip.
-            }
-          }
-
-          temp.exec("COMMIT");
-        } catch (e) {
-          try { temp.exec("ROLLBACK"); } catch { /* ignore */ }
-          throw e;
-        }
-
-        temp.exec("DETACH DATABASE src");
+        temp.exec("DELETE FROM request_logs");
       } finally {
         temp.close();
       }
