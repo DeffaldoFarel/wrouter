@@ -34,28 +34,7 @@ import {
   Shield,
 } from "lucide-react";
 import { KNOWN_API_KEY_PROVIDERS, type KnownApiKeyProvider } from "@/lib/constants/providers";
-import {
-  KNOWN_OAUTH_PROVIDERS,
-  type KnownOAuthProvider,
-} from "@/lib/constants/oauth-providers";
 import { ProviderIcon, KNOWN_ICON_PREFIXES } from "@/components/provider-icons";
-import { OAuthConnectionManager } from "@/components/oauth-connection-manager";
-import { OAuthFlowModal } from "@/components/oauth-flow-modal";
-
-interface OAuthConnection {
-  id: string;
-  provider: string;
-  name: string;
-  email: string | null;
-  authType: "oauth" | "apikey" | "access_token";
-  isActive: boolean;
-  priority: number;
-  testStatus: "untested" | "active" | "error" | "expired";
-  expiresAt: string | null;
-  lastRefreshAt: string | null;
-  lastError: string | null;
-  createdAt: string;
-}
 
 interface Provider {
   id: string;
@@ -497,11 +476,6 @@ export default function ProvidersPage() {
   });
   const [checkingAll, setCheckingAll] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [oauthOpen, setOauthOpen] = useState(false);
-  const [oauthConnections, setOauthConnections] = useState<OAuthConnection[]>([]);
-  const [oauthSelectedProvider, setOauthSelectedProvider] = useState<string | null>(null);
-  const [oauthFlowOpen, setOauthFlowOpen] = useState(false);
-  const [oauthFlowProvider, setOauthFlowProvider] = useState<string | null>(null);
   const [apiKeySetupOpen, setApiKeySetupOpen] = useState(false);
   const [apiKeySetupPrefix, setApiKeySetupPrefix] = useState<string | null>(null);
   const [apiKeySetupValue, setApiKeySetupValue] = useState("");
@@ -527,18 +501,6 @@ export default function ProvidersPage() {
     }
   }, []);
 
-  const fetchOAuthConnections = useCallback(async () => {
-    try {
-      const res = await fetch("/api/oauth/connections");
-      if (res.ok) {
-        const data = await res.json();
-        setOauthConnections(data.connections || []);
-      }
-    } catch {
-      // silently fail — oauth is optional
-    }
-  }, []);
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -554,9 +516,8 @@ export default function ProvidersPage() {
         if (!cancelled) setLoading(false);
       }
     })();
-    fetchOAuthConnections();
     return () => { cancelled = true; };
-  }, [fetchOAuthConnections]);
+  }, []);
 
   const checkHealth = useCallback(async (providerId: string) => {
     setHealthMap((prev) => ({
@@ -920,134 +881,6 @@ export default function ProvidersPage() {
             ))}
           </div>
         )}
-      </div>
-
-      {/* ═══ OAuth Providers ═══ */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Shield className="h-4 w-4 text-muted-foreground" />
-            <h3 className="text-sm font-semibold">OAuth Providers</h3>
-            <Badge variant="secondary" className="text-[10px]">
-              {KNOWN_OAUTH_PROVIDERS.length} available
-            </Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Connect via OAuth for auto-refresh tokens
-          </p>
-        </div>
-        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {KNOWN_OAUTH_PROVIDERS.map((oauthProvider) => {
-            const connections = oauthConnections.filter(
-              (c) => c.provider === oauthProvider.id
-            );
-            const activeConnection = connections.find((c) => c.isActive);
-            const hasConnection = connections.length > 0;
-
-            return (
-              <Card
-                key={oauthProvider.id}
-                className={`group transition-all hover:shadow-md hover:border-primary/40 ${
-                  !hasConnection ? "border-dashed" : ""
-                }`}
-              >
-                <CardContent className="space-y-3">
-                  {/* Header: brand icon + name + status */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="flex items-center justify-center rounded-md shrink-0 h-8 w-8 bg-muted/50 border">
-                        <ProviderIcon prefix={oauthProvider.id} size={20} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-sm leading-tight truncate">
-                          {oauthProvider.name}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                          {oauthProvider.prefix}/
-                        </p>
-                      </div>
-                    </div>
-                    <div className="shrink-0">
-                      {hasConnection ? (
-                        <Badge
-                          variant={activeConnection?.testStatus === "active" ? "default" : "secondary"}
-                          className="text-[10px]"
-                        >
-                          {activeConnection?.testStatus === "active" ? (
-                            <><CheckCircle2 className="h-3 w-3 mr-1" />Connected</>
-                          ) : activeConnection?.testStatus === "error" ? (
-                            <><XCircle className="h-3 w-3 mr-1" />Error</>
-                          ) : activeConnection?.testStatus === "expired" ? (
-                            <><Clock className="h-3 w-3 mr-1" />Expired</>
-                          ) : (
-                            <><AlertCircle className="h-3 w-3 mr-1" />Untested</>
-                          )}
-                        </Badge>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                          Not connected
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
-                    {oauthProvider.description}
-                  </p>
-
-                  {/* Footer */}
-                  {hasConnection ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] text-muted-foreground">
-                        {connections.length} connection{connections.length !== 1 ? "s" : ""}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-[10px]"
-                        onClick={() => {
-                          setOauthSelectedProvider(oauthProvider.id);
-                          setOauthOpen(true);
-                        }}
-                      >
-                        <Shield className="h-3 w-3 mr-1" />
-                        Manage
-                      </Button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOauthFlowProvider(oauthProvider.id);
-                        setOauthFlowOpen(true);
-                      }}
-                      className="flex items-center gap-1 text-[11px] text-primary hover:underline"
-                    >
-                      <Plus className="h-3 w-3" />
-                      Connect now
-                    </button>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-        <OAuthConnectionManager open={oauthOpen} onOpenChange={(open) => {
-          setOauthOpen(open);
-          if (!open) {
-            setOauthSelectedProvider(null);
-            fetchOAuthConnections();
-          }
-        }} filterProvider={oauthSelectedProvider} />
-        <OAuthFlowModal
-          open={oauthFlowOpen}
-          onOpenChange={setOauthFlowOpen}
-          provider={oauthFlowProvider}
-          onSuccess={() => {
-            fetchOAuthConnections();
-          }}
-        />
       </div>
 
       {/* ═══ API Key Providers ═══ */}
