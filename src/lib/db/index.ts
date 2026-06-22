@@ -32,19 +32,27 @@ sqlite.pragma("busy_timeout = 5000");
 
 export const db = drizzle(sqlite, { schema });
 
+// Guard: ensure initialization runs only once per process
+let _initialized = false;
+
 // Initialize database tables
 export function initializeDatabase() {
+  if (_initialized) return;
+  _initialized = true;
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS providers (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       prefix TEXT NOT NULL DEFAULT '',
       base_url TEXT NOT NULL,
-      api_key TEXT NOT NULL,
+      api_key TEXT,
       models TEXT NOT NULL DEFAULT '[]',
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'custom',
+      format TEXT NOT NULL DEFAULT 'openai',
+      connection_strategy TEXT NOT NULL DEFAULT 'priority'
     );
 
     CREATE TABLE IF NOT EXISTS combos (
@@ -73,13 +81,16 @@ export function initializeDatabase() {
       provider_id TEXT,
       combo_id TEXT,
       api_key_id TEXT,
+      connection_id TEXT,
       tokens_in INTEGER,
       tokens_out INTEGER,
       latency_ms INTEGER,
       status TEXT NOT NULL,
       error TEXT,
       request_detail TEXT,
-      response_detail TEXT
+      response_detail TEXT,
+      is_streaming INTEGER NOT NULL DEFAULT 0,
+      cost_usd TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
@@ -91,96 +102,7 @@ export function initializeDatabase() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-  `);
 
-  // Migration: add prefix column if not exists
-  try {
-    sqlite.exec(`ALTER TABLE providers ADD COLUMN prefix TEXT NOT NULL DEFAULT ''`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add unique index on prefix (ignore if exists)
-  try {
-    sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_providers_prefix ON providers(prefix) WHERE prefix != ''`);
-  } catch {
-    // Index already exists, ignore
-  }
-
-  // Migration: add api_key_id column to request_logs if not exists
-  try {
-    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN api_key_id TEXT`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add type column to providers if not exists
-  try {
-    sqlite.exec(`ALTER TABLE providers ADD COLUMN type TEXT NOT NULL DEFAULT 'custom'`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add format column to providers if not exists
-  // format = upstream API dialect: "openai" (default) | "anthropic" | "gemini"
-  try {
-    sqlite.exec(`ALTER TABLE providers ADD COLUMN format TEXT NOT NULL DEFAULT 'openai'`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Auto-detect format for known native endpoints (existing rows only)
-  try {
-    sqlite.exec(`UPDATE providers SET format='anthropic' WHERE base_url LIKE '%anthropic.com%' AND format='openai'`);
-    sqlite.exec(`UPDATE providers SET format='gemini' WHERE base_url LIKE '%generativelanguage.googleapis.com%' AND format='openai'`);
-  } catch {
-    // ignore
-  }
-
-  // Mark known API key providers (aggregators with model catalog API)
-  // This handles migration from old single-key version (type='custom') to multi-key version (type='apikey')
-  try {
-    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%openrouter.ai%' AND type='custom'`);
-    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%api.deepseek.com%' AND type='custom'`);
-    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%generativelanguage.googleapis.com%' AND type='custom'`);
-    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%api.anthropic.com%' AND type='custom'`);
-    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%api.openai.com%' AND type='custom'`);
-    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%xiaomimimo.com%' AND type='custom'`);
-    sqlite.exec(`UPDATE providers SET type='apikey' WHERE base_url LIKE '%dashscope%' AND type='custom'`);
-  } catch {
-    // ignore
-  }
-
-  // Migration: add allowed_models column to api_keys if not exists
-  try {
-    sqlite.exec(`ALTER TABLE api_keys ADD COLUMN allowed_models TEXT NOT NULL DEFAULT '[]'`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add request_detail column to request_logs if not exists
-  try {
-    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN request_detail TEXT`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add response_detail column to request_logs if not exists
-  try {
-    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN response_detail TEXT`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add is_streaming column to request_logs if not exists
-  try {
-    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN is_streaming INTEGER NOT NULL DEFAULT 0`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add provider_connections table for OAuth support
-  sqlite.exec(`
     CREATE TABLE IF NOT EXISTS provider_connections (
       id TEXT PRIMARY KEY,
       provider TEXT NOT NULL,
@@ -190,118 +112,27 @@ export function initializeDatabase() {
       priority INTEGER,
       is_active INTEGER NOT NULL DEFAULT 1,
       data TEXT NOT NULL DEFAULT '{}',
+      provider_id TEXT REFERENCES providers(id),
+      error_count INTEGER NOT NULL DEFAULT 0,
+      last_error_code TEXT,
+      last_error_at TEXT,
+      rate_limit INTEGER,
+      rate_limit_window INTEGER,
+      current_usage INTEGER NOT NULL DEFAULT 0,
+      last_used_at TEXT,
+      rate_limited_until TEXT,
+      max_errors INTEGER NOT NULL DEFAULT 5,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_providers_prefix ON providers(prefix) WHERE prefix != '';
     CREATE INDEX IF NOT EXISTS pc_provider_idx ON provider_connections(provider);
     CREATE INDEX IF NOT EXISTS pc_provider_active_idx ON provider_connections(provider, is_active);
     CREATE INDEX IF NOT EXISTS pc_priority_idx ON provider_connections(priority);
+    CREATE INDEX IF NOT EXISTS pc_provider_id_idx ON provider_connections(provider_id);
+    CREATE INDEX IF NOT EXISTS pc_provider_id_active_idx ON provider_connections(provider_id, is_active);
+    CREATE INDEX IF NOT EXISTS connection_id_idx ON request_logs(connection_id);
   `);
-
-  // Migration: add connection_strategy column to providers for multi-key support
-  try {
-    sqlite.exec(`ALTER TABLE providers ADD COLUMN connection_strategy TEXT NOT NULL DEFAULT 'priority'`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: add provider_id and error tracking columns to provider_connections
-  const multiKeyColumns = [
-    `ALTER TABLE provider_connections ADD COLUMN provider_id TEXT REFERENCES providers(id)`,
-    `ALTER TABLE provider_connections ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE provider_connections ADD COLUMN last_error_code TEXT`,
-    `ALTER TABLE provider_connections ADD COLUMN last_error_at TEXT`,
-    `ALTER TABLE provider_connections ADD COLUMN rate_limit INTEGER`,
-    `ALTER TABLE provider_connections ADD COLUMN rate_limit_window INTEGER`,
-    `ALTER TABLE provider_connections ADD COLUMN current_usage INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE provider_connections ADD COLUMN last_used_at TEXT`,
-    `ALTER TABLE provider_connections ADD COLUMN rate_limited_until TEXT`,
-    `ALTER TABLE provider_connections ADD COLUMN max_errors INTEGER NOT NULL DEFAULT 5`,
-  ];
-  for (const stmt of multiKeyColumns) {
-    try { sqlite.exec(stmt); } catch { /* column already exists */ }
-  }
-
-  // New indexes for provider_connections
-  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS pc_provider_id_idx ON provider_connections(provider_id)`); } catch {}
-  try { sqlite.exec(`CREATE INDEX IF NOT EXISTS pc_provider_id_active_idx ON provider_connections(provider_id, is_active)`); } catch {}
-
-  // Migration: add connection_id column to request_logs (I5: multi-key debugging)
-  try {
-    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN connection_id TEXT`);
-  } catch { /* already exists */ }
-  try {
-    sqlite.exec(`CREATE INDEX IF NOT EXISTS connection_id_idx ON request_logs(connection_id)`);
-  } catch { /* already exists */ }
-
-  // Migration: add cost_usd column to request_logs if not exists
-  try {
-    sqlite.exec(`ALTER TABLE request_logs ADD COLUMN cost_usd TEXT`);
-  } catch {
-    // Column already exists, ignore
-  }
-
-  // Migration: remove NOT NULL constraint from providers.api_key (keys are now optional, managed via provider_connections)
-  try {
-    const hasNotNull = sqlite.prepare("SELECT sql FROM sqlite_master WHERE name='providers'").get() as { sql: string } | undefined;
-    if (hasNotNull && hasNotNull.sql && hasNotNull.sql.includes('api_key TEXT NOT NULL')) {
-      // SQLite doesn't support ALTER COLUMN, so recreate the table.
-      // Wrap in transaction for atomicity — if process is killed mid-migration,
-      // the entire change rolls back instead of leaving the DB in a half-migrated state.
-      sqlite.exec(`
-        BEGIN IMMEDIATE;
-        CREATE TABLE providers_new (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          base_url TEXT NOT NULL,
-          api_key TEXT,
-          models TEXT NOT NULL DEFAULT '[]',
-          enabled INTEGER NOT NULL DEFAULT 1,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          prefix TEXT NOT NULL DEFAULT '',
-          type TEXT NOT NULL DEFAULT 'custom',
-          format TEXT NOT NULL DEFAULT 'openai',
-          connection_strategy TEXT NOT NULL DEFAULT 'priority'
-        );
-        INSERT INTO providers_new (id, name, base_url, api_key, models, enabled, created_at, updated_at, prefix, type, format, connection_strategy)
-          SELECT id, name, base_url, api_key, models, enabled, created_at, updated_at, prefix, type, format, connection_strategy FROM providers;
-        DROP TABLE providers;
-        ALTER TABLE providers_new RENAME TO providers;
-        COMMIT;
-      `);
-      console.log('[db] Removed NOT NULL constraint from providers.api_key (atomic migration)');
-    }
-  } catch (e) {
-    console.error('[db] Migration api_key NOT NULL failed:', e);
-  }
-
-  // Migration: migrate existing providers.apiKey to provider_connections (multi-key support)
-  // For each provider that has an api_key but no provider_connections entry, create one.
-  // Note: providers.api_key is already encrypted, so we copy it as-is into data JSON.
-  try {
-    const providersWithKey = sqlite.prepare(
-      `SELECT id, prefix, api_key FROM providers WHERE api_key IS NOT NULL AND api_key != ''`
-    ).all() as Array<{ id: string; prefix: string; api_key: string }>;
-
-    for (const p of providersWithKey) {
-      const hasConn = sqlite.prepare(
-        `SELECT id FROM provider_connections WHERE provider_id = ? AND auth_type = 'apikey'`
-      ).get(p.id);
-
-      if (!hasConn) {
-        const now = new Date().toISOString();
-        const connId = `conn-mig-${Date.now()}-${p.id.slice(0, 8)}`;
-        // Key is already encrypted in providers.api_key — copy as-is
-        sqlite.prepare(
-          `INSERT INTO provider_connections (id, provider_id, provider, auth_type, name, priority, is_active, data, max_errors, current_usage, error_count, created_at, updated_at)
-           VALUES (?, ?, ?, 'apikey', 'Primary Key (migrated)', 0, 1, ?, 5, 0, 0, ?, ?)`
-        ).run(connId, p.id, p.prefix, JSON.stringify({ apiKey: p.api_key }), now, now);
-      }
-    }
-  } catch (e) {
-    // ignore — may fail if table doesn't exist yet
-  }
 
   // Seed default settings if not exist
   const defaultSettings = [

@@ -312,7 +312,7 @@ export default function ProviderSetupPage() {
                 What happens next
               </div>
               <ol className="text-xs text-muted-foreground space-y-1 ml-5 list-decimal">
-                <li>API key is encrypted and stored securely</li>
+                <li>API key is stored securely in local database</li>
                 <li>Available models are auto-fetched and cached</li>
                 <li>You can immediately route requests via{" "}
                   <code className="bg-background px-1 py-0.5 rounded text-foreground/80">
@@ -384,8 +384,9 @@ export default function ProviderSetupPage() {
         <div className="text-xs text-muted-foreground space-y-1">
           <p className="font-medium text-foreground">Your API key is safe</p>
           <p>
-            Keys are encrypted with AES-256-GCM before being stored, and never logged.
-            You can revoke or rotate your key anytime from the provider detail page.
+            Keys are stored in a local SQLite database and never logged or transmitted
+            outside your machine. You can revoke or rotate your key anytime from the
+            provider detail page.
           </p>
         </div>
       </div>
