@@ -4,9 +4,8 @@
  * Generates random secrets if not already set in environment.
  * Secrets are persisted to DATA_DIR/.secrets so they survive restarts.
  *
- * NOTE: ENCRYPTION_KEY was previously used for API key encryption.
- * API keys are now stored plaintext (matches 9router upstream).
- * ENCRYPTION_KEY is kept for backward-compat migration only.
+ * IMPORTANT: ENCRYPTION_KEY is separate from JWT_SECRET so JWT can be rotated
+ * without losing access to encrypted API keys in the database.
  */
 
 import * as path from "path";
@@ -18,7 +17,6 @@ const SECRETS_FILE = path.join(DATA_DIR, ".secrets");
 
 interface Secrets {
   jwtSecret?: string;
-  // encryptionKey kept for backward-compat migration (API keys now plaintext)
   encryptionKey?: string;
 }
 

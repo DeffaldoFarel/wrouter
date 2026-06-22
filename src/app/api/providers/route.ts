@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkDashboardAuth } from "@/lib/auth/session";
 import { validateUrl } from "@/lib/ssrf-guard";
-// API keys stored plaintext — matches 9router upstream.
+import { encrypt, safeDecryptApiKey } from "@/lib/crypto";
 import { validateProvider } from "@/lib/validation";
 import { invalidateProviderCache } from "@/lib/router/engine";
 import { maskApiKey } from "@/lib/utils/mask-key";
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   const result = allProviders.map((p) => ({
     ...p,
     models: JSON.parse(p.models),
-    apiKey: p.apiKey ? maskApiKey(p.apiKey) : null,
+    apiKey: p.apiKey ? maskApiKey(safeDecryptApiKey(p.apiKey)) : null,
   }));
 
   return NextResponse.json(result);
@@ -48,13 +48,12 @@ export async function POST(req: NextRequest) {
     let { format } = body as { format?: string };
     if (!format) {
       if (baseUrl.includes("anthropic.com")) format = "anthropic";
-      else if (baseUrl.includes("cloudcode-pa.googleapis.com")) format = "gemini-cli";
       else if (baseUrl.includes("generativelanguage.googleapis.com")) format = "gemini";
       else format = "openai";
     }
-    if (!["openai", "anthropic", "gemini", "gemini-cli"].includes(format)) {
+    if (!["openai", "anthropic", "gemini"].includes(format)) {
       return NextResponse.json(
-        { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', 'gemini', or 'gemini-cli'.` },
+        { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', or 'gemini'.` },
         { status: 400 }
       );
     }
@@ -83,7 +82,7 @@ export async function POST(req: NextRequest) {
       name,
       prefix,
       baseUrl: baseUrl.replace(/\/$/, ""),
-      apiKey: apiKey ?? null,
+      apiKey: apiKey ? encrypt(apiKey) : null,
       models: JSON.stringify([]),
       enabled: true,
       type,
@@ -104,7 +103,7 @@ export async function POST(req: NextRequest) {
         name: "Primary Key",
         priority: 0,
         isActive: true,
-        data: JSON.stringify({ apiKey: apiKey }),
+        data: JSON.stringify({ apiKey: encrypt(apiKey) }),
         maxErrors: 5,
         currentUsage: 0,
         errorCount: 0,

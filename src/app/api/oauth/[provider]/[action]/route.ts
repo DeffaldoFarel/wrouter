@@ -21,7 +21,6 @@ import {
 import { generatePKCE } from "@/lib/oauth/pkce";
 import { KIRO_CONSTANTS } from "@/lib/oauth/constants";
 import { createOrUpdateConnection } from "@/lib/oauth/connections";
-import { autoProvisionProvider } from "@/lib/oauth/auto-provision";
 import { checkDashboardAuth } from "@/lib/auth/session";
 import { validateOAuthToken } from "@/lib/validation";
 import { oauthLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
@@ -135,27 +134,7 @@ function handleAuthorize(request: NextRequest, provider: string) {
     );
   }
 
-  // Store codeVerifier and state in cookies so the callback route can use them
-  const response = NextResponse.json(result);
-  if (result.codeVerifier) {
-    response.cookies.set("oauth_code_verifier", result.codeVerifier, {
-      httpOnly: true,
-      secure: false, // localhost
-      sameSite: "lax",
-      maxAge: 600, // 10 minutes
-      path: "/",
-    });
-  }
-  if (result.state) {
-    response.cookies.set("oauth_state", result.state, {
-      httpOnly: true,
-      secure: false,
-      sameSite: "lax",
-      maxAge: 600,
-      path: "/",
-    });
-  }
-  return response;
+  return NextResponse.json(result);
 }
 
 /**
@@ -249,9 +228,6 @@ async function handleExchange(
     { provider, connectionId: connection.id, email: connection.email },
     "OAuth connection created/updated"
   );
-
-  // Auto-provision: create provider if not exists + link connection
-  autoProvisionProvider(provider, connection.id);
 
   return NextResponse.json({ connection });
 }

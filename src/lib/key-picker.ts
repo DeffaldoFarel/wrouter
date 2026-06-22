@@ -6,7 +6,7 @@
  *   "round-robin" → least recently used among available connections
  *   "random"      → random pick among available connections
  *
- * On failure: track error (display only, no auto-blocking), 429 → temporary rate-limit skip.
+ * On failure: track error, auto-disable after maxErrors, 429 → immediate skip.
  *
  * Inspired by GenflowAi/9router connection picker.
  */
@@ -14,6 +14,7 @@ import { db } from "./db";
 import { providerConnections, providers } from "./db/schema";
 import { eq, and, isNull, lte, lt, or, asc, sql, notInArray } from "drizzle-orm";
 import { safeDecryptApiKey } from "./crypto";
+import { encrypt } from "./crypto";
 import { v4 as uuidv4 } from "uuid";
 
 // Maximum retry attempts when fallback to next key
@@ -24,7 +25,6 @@ export interface SelectedKey {
   connectionId: string;
   apiKey: string;
   providerId: string;
-  projectId?: string | null;
 }
 
 export interface KeyPickResult {
@@ -74,11 +74,9 @@ function isRateLimited(conn: typeof providerConnections.$inferSelect): boolean {
 
 /**
  * Check if a connection has exceeded its error threshold.
- * @deprecated Error-based auto-blocking is disabled. This function now always returns false.
- * Error counts are still tracked for monitoring purposes only.
  */
-function isDisabledByErrors(_conn: typeof providerConnections.$inferSelect): boolean {
-  return false;
+function isDisabledByErrors(conn: typeof providerConnections.$inferSelect): boolean {
+  return conn.errorCount >= conn.maxErrors;
 }
 
 /**
@@ -104,6 +102,8 @@ function getAvailableConnections(
       isNull(providerConnections.rateLimitedUntil),
       lte(providerConnections.rateLimitedUntil, now),
     ),
+    // Not disabled by errors
+    lt(providerConnections.errorCount, providerConnections.maxErrors),
   ];
 
   if (excludes.length > 0) {
@@ -174,30 +174,20 @@ export function pickConnection(
   // Extract API key from the data JSON blob
   const data = JSON.parse(selected.data || "{}");
   const encryptedKey = data.apiKey as string | undefined;
-  const accessToken = data.accessToken as string | undefined;
-
-  // OAuth connections store accessToken; API key connections store apiKey
-  let apiKey: string;
-  if (encryptedKey) {
-    apiKey = safeDecryptApiKey(encryptedKey);
-  } else if (accessToken) {
-    apiKey = accessToken;
-  } else {
-    return { key: null, connectionId: null, reason: "Connection has no API key or access token" };
+  if (!encryptedKey) {
+    return { key: null, connectionId: null, reason: "Connection has no API key" };
   }
+
+  const apiKey = safeDecryptApiKey(encryptedKey);
 
   // Record usage
   recordUsage(selected.id);
-
-  // Extract projectId for Gemini CLI OAuth connections
-  const projectId = data.projectId as string | undefined;
 
   return {
     key: {
       connectionId: selected.id,
       apiKey,
       providerId,
-      projectId: projectId || null,
     },
     connectionId: selected.id,
     reason: null,
@@ -433,7 +423,7 @@ export function createApiKeyConnection(input: CreateApiKeyConnectionInput): type
     lastUsedAt: null,
     rateLimitedUntil: null,
     maxErrors: input.maxErrors ?? 5,
-    data: JSON.stringify({ apiKey: input.apiKey }),
+    data: JSON.stringify({ apiKey: encrypt(input.apiKey) }),
     createdAt: now,
     updatedAt: now,
   };
@@ -520,7 +510,7 @@ export function updateApiKeyConnection(
   if (updates.maxErrors !== undefined) dbUpdates.maxErrors = updates.maxErrors;
   if (updates.apiKey !== undefined) {
     const data = JSON.parse(conn.data || "{}");
-    data.apiKey = updates.apiKey;
+    data.apiKey = encrypt(updates.apiKey);
     dbUpdates.data = JSON.stringify(data);
   }
 

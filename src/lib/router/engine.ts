@@ -90,13 +90,11 @@ export interface RoutingResult {
   baseUrl: string;
   apiKey: string;
   model: string;
-  // Upstream API dialect: "openai" (default) | "anthropic" | "gemini" | "gemini-cli"
+  // Upstream API dialect: "openai" (default) | "anthropic" | "gemini"
   // Determines how proxy.ts translates the request/response.
   format: string;
   // Multi-key support: which connection was used (null if fallback to provider-level key)
   connectionId: string | null;
-  // Gemini CLI OAuth: project ID for Cloud Code Assist envelope
-  projectId?: string | null;
 }
 
 /**
@@ -115,18 +113,18 @@ export interface RoutingResult {
  */
 function resolveProviderKey(
   provider: typeof providers.$inferSelect,
-): { apiKey: string; connectionId: string | null; projectId?: string | null } | null {
+): { apiKey: string; connectionId: string | null } | null {
   // Try multi-key connections first
   const strategy = (provider as { connectionStrategy?: string }).connectionStrategy ?? "priority";
   const picked = pickConnection(provider.id, strategy);
 
   if (picked.key) {
-    return { apiKey: picked.key.apiKey, connectionId: picked.connectionId, projectId: picked.key.projectId || null };
+    return { apiKey: picked.key.apiKey, connectionId: picked.connectionId };
   }
 
   // Fallback to provider-level single key (backward compatibility)
   if (provider.apiKey) {
-    return { apiKey: safeDecryptApiKey(provider.apiKey), connectionId: null, projectId: null };
+    return { apiKey: safeDecryptApiKey(provider.apiKey), connectionId: null };
   }
 
   return null;
@@ -151,7 +149,6 @@ function buildRoutingResult(
     format: (provider as { format?: string }).format ?? "openai",
     model: modelName,
     connectionId: keyInfo.connectionId,
-    projectId: keyInfo.projectId || null,
   };
 }
 
@@ -186,7 +183,6 @@ function buildAllRoutingResults(
       format: (provider as { format?: string }).format ?? "openai",
       model: modelName,
       connectionId: picked.connectionId,
-      projectId: picked.key.projectId || null,
     });
     tried.push(picked.connectionId);
   }

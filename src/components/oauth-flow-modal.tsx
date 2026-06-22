@@ -105,11 +105,7 @@ export function OAuthFlowModal({
 
   const initAuthCodeFlow = async () => {
     const res = await fetch(`/api/oauth/${provider}/authorize`);
-    if (!res.ok) {
-      // Show actual server error instead of generic message
-      const text = await res.text();
-      throw new Error(`Failed to generate auth URL (${res.status}): ${text}`);
-    }
+    if (!res.ok) throw new Error("Failed to generate auth URL");
 
     const data = await res.json();
     setAuthUrl(data.authUrl);

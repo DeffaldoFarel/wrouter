@@ -5,15 +5,9 @@ const IV_LENGTH = 16;
 const PREFIX = "enc:v1:";
 
 /**
- * API key crypto utilities — backward-compat only.
- *
- * NEW keys are stored plaintext (matches 9router upstream).
- * These functions exist solely to decrypt legacy `enc:v1:*` values
- * during the one-time migration in db/index.ts, and to safely read
- * any values that somehow remain encrypted (safeDecryptApiKey).
- *
- * After migration, safeDecryptApiKey is effectively a passthrough
- * for all values since everything is plaintext.
+ * Derive a unique, deterministic salt.
+ * Uses ENCRYPTION_KEY as the source so encrypted data is independent from JWT rotation.
+ * Falls back to JWT_SECRET for backward compatibility with pre-split installs.
  */
 function getDerivedSalt(): string {
   // Prefer ENCRYPTION_KEY salt for new installs

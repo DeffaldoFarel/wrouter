@@ -42,7 +42,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { getProviderIcon } from "@/components/provider-icons";
-import { OAuthFlowModal } from "@/components/oauth-flow-modal";
 
 interface Provider {
   id: string;
@@ -53,7 +52,6 @@ interface Provider {
   models: string[];
   enabled: boolean;
   type: string; // "custom" | "apikey"
-  format?: string; // "openai" | "anthropic" | "gemini" | "gemini-cli"
   createdAt: string;
   updatedAt: string;
 }
@@ -78,9 +76,7 @@ type ProviderHealth =
 
 function maskApiKey(key: string): string {
   if (!key || key.length < 8) return "••••••••";
-  return (
-    key.slice(0, 4) + "•".repeat(Math.min(20, key.length - 8)) + key.slice(-4)
-  );
+  return key.slice(0, 4) + "•".repeat(Math.min(20, key.length - 8)) + key.slice(-4);
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -122,7 +118,8 @@ function ProviderHealthIndicator({
     },
     offline: {
       label: "Offline",
-      className: "text-red-700 bg-red-50 dark:text-red-400 dark:bg-red-950/30",
+      className:
+        "text-red-700 bg-red-50 dark:text-red-400 dark:bg-red-950/30",
       icon: XCircle,
     },
   }[health.status];
@@ -135,12 +132,8 @@ function ProviderHealthIndicator({
 
   return (
     <div className="flex items-center gap-2">
-      <div
-        className={`flex items-center gap-1.5 px-2 py-1 rounded-md ${config.className}`}
-      >
-        <Icon
-          className={`h-3.5 w-3.5 ${health.status === "checking" ? "animate-spin" : ""}`}
-        />
+      <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md ${config.className}`}>
+        <Icon className={`h-3.5 w-3.5 ${health.status === "checking" ? "animate-spin" : ""}`} />
         <span className="text-xs font-medium">
           {health.status === "online" && "latencyMs" in health
             ? `${config.label} (${health.latencyMs}ms)`
@@ -192,9 +185,7 @@ function StatItem({
           {label}
         </p>
         <p className="text-lg font-bold tabular-nums leading-tight">{value}</p>
-        {hint && (
-          <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>
-        )}
+        {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
       </div>
     </div>
   );
@@ -255,9 +246,7 @@ export default function ProviderDetailPage() {
   const [providerHealth, setProviderHealth] = useState<ProviderHealth>({
     status: "unknown",
   });
-  const [modelHealth, setModelHealth] = useState<Record<string, ModelHealth>>(
-    {},
-  );
+  const [modelHealth, setModelHealth] = useState<Record<string, ModelHealth>>({});
   const [testingAll, setTestingAll] = useState(false);
 
   // Stats from usage API
@@ -270,30 +259,23 @@ export default function ProviderDetailPage() {
   } | null>(null);
 
   // Multi-key management
-  const [apiKeys, setApiKeys] = useState<
-    Array<{
-      id: string;
-      name: string;
-      priority: number;
-      isActive: boolean;
-      errorCount: number;
-      maxErrors: number;
-      lastErrorCode: string | null;
-      lastUsedAt: string | null;
-      lastErrorAt: string | null;
-      rateLimitedUntil: string | null;
-      createdAt: string;
-    }>
-  >([]);
-  const [keysLoading, setKeysLoading] = useState(false);
-  const [addKeyOpen, setAddKeyOpen] = useState(false);
-  const [oauthFlowOpen, setOauthFlowOpen] = useState(false);
-  const [editKeyOpen, setEditKeyOpen] = useState<string | null>(null);
-  const [editKeyForm, setEditKeyForm] = useState<{
+  const [apiKeys, setApiKeys] = useState<Array<{
+    id: string;
     name: string;
     priority: number;
+    isActive: boolean;
+    errorCount: number;
     maxErrors: number;
-  }>({
+    lastErrorCode: string | null;
+    lastUsedAt: string | null;
+    lastErrorAt: string | null;
+    rateLimitedUntil: string | null;
+    createdAt: string;
+  }>>([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [addKeyOpen, setAddKeyOpen] = useState(false);
+  const [editKeyOpen, setEditKeyOpen] = useState<string | null>(null);
+  const [editKeyForm, setEditKeyForm] = useState<{ name: string; priority: number; maxErrors: number }>({
     name: "",
     priority: 0,
     maxErrors: 5,
@@ -327,10 +309,7 @@ export default function ProviderDetailPage() {
         setName(data.name);
         setPrefix(data.prefix);
         setBaseUrl(data.baseUrl);
-        setConnectionStrategy(
-          ((data as Record<string, unknown>).connectionStrategy as string) ??
-            "priority",
-        );
+        setConnectionStrategy(((data as Record<string, unknown>).connectionStrategy as string) ?? "priority");
         setModelList(data.models);
       } else {
         toast.error("Provider not found");
@@ -349,7 +328,7 @@ export default function ProviderDetailPage() {
       if (res.ok) {
         const data = await res.json();
         const breakdown = data.perProviderBreakdown?.find(
-          (p: { providerId: string }) => p.providerId === params.id,
+          (p: { providerId: string }) => p.providerId === params.id
         );
         if (breakdown) {
           setStats({
@@ -394,9 +373,7 @@ export default function ProviderDetailPage() {
 
       // Persist to shared health cache (so list page can pick it up too)
       try {
-        const cache = JSON.parse(
-          localStorage.getItem("wrouter:health-cache") || "{}",
-        );
+        const cache = JSON.parse(localStorage.getItem("wrouter:health-cache") || "{}");
         cache[params.id as string] = {
           status: result.status,
           latencyMs: "latencyMs" in result ? result.latencyMs : undefined,
@@ -478,9 +455,7 @@ export default function ProviderDetailPage() {
     prefix !== (provider?.prefix ?? "") ||
     (provider?.type !== "apikey" && baseUrl !== (provider?.baseUrl ?? "")) ||
     apiKey !== "" ||
-    connectionStrategy !==
-      ((provider as unknown as Record<string, unknown>)?.connectionStrategy ??
-        "priority") ||
+    connectionStrategy !== ((provider as unknown as Record<string, unknown>)?.connectionStrategy ?? "priority") ||
     JSON.stringify(modelList) !== JSON.stringify(provider?.models ?? []);
 
   async function handleSave(e: React.FormEvent) {
@@ -565,9 +540,7 @@ export default function ProviderDetailPage() {
   async function deleteProvider() {
     setDeleting(true);
     try {
-      const res = await fetch(`/api/providers/${params.id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/providers/${params.id}`, { method: "DELETE" });
       if (res.ok) {
         toast.success("Provider deleted");
         router.push("/dashboard/providers");
@@ -600,11 +573,7 @@ export default function ProviderDetailPage() {
       } else {
         setModelHealth((prev) => ({
           ...prev,
-          [model]: {
-            status: "unhealthy",
-            latencyMs: data.latencyMs,
-            error: data.error,
-          },
+          [model]: { status: "unhealthy", latencyMs: data.latencyMs, error: data.error },
         }));
       }
     } catch {
@@ -661,12 +630,9 @@ export default function ProviderDetailPage() {
 
   async function handleToggleKey(connectionId: string) {
     try {
-      const res = await fetch(
-        `/api/providers/${params.id}/keys/${connectionId}`,
-        {
-          method: "PATCH",
-        },
-      );
+      const res = await fetch(`/api/providers/${params.id}/keys/${connectionId}`, {
+        method: "PATCH",
+      });
       if (res.ok) {
         fetchApiKeys();
         toast.success("Key toggled");
@@ -678,12 +644,9 @@ export default function ProviderDetailPage() {
 
   async function handleDeleteKey(connectionId: string) {
     try {
-      const res = await fetch(
-        `/api/providers/${params.id}/keys/${connectionId}`,
-        {
-          method: "DELETE",
-        },
-      );
+      const res = await fetch(`/api/providers/${params.id}/keys/${connectionId}`, {
+        method: "DELETE",
+      });
       if (res.ok) {
         fetchApiKeys();
         toast.success("Key deleted");
@@ -693,19 +656,13 @@ export default function ProviderDetailPage() {
     }
   }
 
-  async function handleUpdateKey(
-    connectionId: string,
-    updates: Record<string, unknown>,
-  ) {
+  async function handleUpdateKey(connectionId: string, updates: Record<string, unknown>) {
     try {
-      const res = await fetch(
-        `/api/providers/${params.id}/keys/${connectionId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updates),
-        },
-      );
+      const res = await fetch(`/api/providers/${params.id}/keys/${connectionId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
       if (res.ok) {
         fetchApiKeys();
         setEditKeyOpen(null);
@@ -784,9 +741,7 @@ export default function ProviderDetailPage() {
             })()}
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-2xl font-bold tracking-tight">
-                  {provider.name}
-                </h1>
+                <h1 className="text-2xl font-bold tracking-tight">{provider.name}</h1>
                 <Badge variant={provider.enabled ? "default" : "secondary"}>
                   {provider.enabled ? "Active" : "Disabled"}
                 </Badge>
@@ -808,7 +763,10 @@ export default function ProviderDetailPage() {
             health={providerHealth}
             onCheck={checkProviderHealth}
           />
-          <Switch checked={provider.enabled} onCheckedChange={toggleProvider} />
+          <Switch
+            checked={provider.enabled}
+            onCheckedChange={toggleProvider}
+          />
           <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
             <DialogTrigger
               render={
@@ -826,9 +784,9 @@ export default function ProviderDetailPage() {
                 <DialogTitle>Delete Provider</DialogTitle>
                 <DialogDescription>
                   Are you sure you want to delete{" "}
-                  <strong className="text-foreground">{provider.name}</strong>?
-                  This action cannot be undone and will remove all associated
-                  models and configurations.
+                  <strong className="text-foreground">{provider.name}</strong>? This
+                  action cannot be undone and will remove all associated models and
+                  configurations.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -839,11 +797,7 @@ export default function ProviderDetailPage() {
                 >
                   Cancel
                 </Button>
-                <Button
-                  variant="destructive"
-                  onClick={deleteProvider}
-                  disabled={deleting}
-                >
+                <Button variant="destructive" onClick={deleteProvider} disabled={deleting}>
                   {deleting ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
@@ -914,10 +868,7 @@ export default function ProviderDetailPage() {
                 Provider Settings
               </CardTitle>
               {hasChanges && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] text-amber-600 border-amber-300"
-                >
+                <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
                   Unsaved changes
                 </Badge>
               )}
@@ -941,17 +892,13 @@ export default function ProviderDetailPage() {
                   id="prefix"
                   value={prefix}
                   onChange={(e) =>
-                    setPrefix(
-                      e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
-                    )
+                    setPrefix(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
                   }
                   required
                 />
                 <p className="text-xs text-muted-foreground">
                   Used to call models:{" "}
-                  <code className="bg-muted px-1 py-0.5 rounded">
-                    {prefix}/model-name
-                  </code>
+                  <code className="bg-muted px-1 py-0.5 rounded">{prefix}/model-name</code>
                 </p>
               </div>
               <div className="space-y-2">
@@ -991,44 +938,25 @@ export default function ProviderDetailPage() {
                 <Badge variant="outline" className="text-[10px]">
                   {apiKeys.length} key{apiKeys.length !== 1 ? "s" : ""}
                 </Badge>
-                <Dialog
-                  open={addKeyOpen}
-                  onOpenChange={(open) => {
-                    setAddKeyOpen(open);
-                    if (open) {
-                      setNewKeyName("");
-                      setNewKeyApiKey("");
-                      setNewKeyPriority(0);
-                    }
-                  }}
-                >
+                <Dialog open={addKeyOpen} onOpenChange={(open) => {
+                  setAddKeyOpen(open);
+                  if (open) {
+                    setNewKeyName("");
+                    setNewKeyApiKey("");
+                    setNewKeyPriority(0);
+                  }
+                }}>
                   <DialogTrigger>
                     <span className="inline-flex items-center justify-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground cursor-pointer">
                       <Plus className="h-3.5 w-3.5 mr-1" />
                       Add Key
                     </span>
                   </DialogTrigger>
-                  {/* OAuth Connect button for OAuth-based providers */}
-                  {provider &&
-                    ["gemini-cli", "anthropic", "openai"].includes(
-                      provider.format || "",
-                    ) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setOauthFlowOpen(true)}
-                      >
-                        <Plus className="h-3.5 w-3.5 mr-1" />
-                        Connect via OAuth
-                      </Button>
-                    )}
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Add API Key</DialogTitle>
                       <DialogDescription>
-                        Add a new API key for this provider. Keys are used based
-                        on priority and strategy.
+                        Add a new API key for this provider. Keys are used based on priority and strategy.
                       </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-2">
@@ -1057,14 +985,7 @@ export default function ProviderDetailPage() {
                             min={0}
                             step={1}
                             value={newKeyPriority}
-                            onChange={(e) =>
-                              setNewKeyPriority(
-                                Math.max(
-                                  0,
-                                  Math.floor(Number(e.target.value) || 0),
-                                ),
-                              )
-                            }
+                            onChange={(e) => setNewKeyPriority(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
                           />
                         </div>
                         <div>
@@ -1074,23 +995,13 @@ export default function ProviderDetailPage() {
                             min={1}
                             step={1}
                             value={newKeyMaxErrors}
-                            onChange={(e) =>
-                              setNewKeyMaxErrors(
-                                Math.max(
-                                  1,
-                                  Math.floor(Number(e.target.value) || 1),
-                                ),
-                              )
-                            }
+                            onChange={(e) => setNewKeyMaxErrors(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
                           />
                         </div>
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button
-                        variant="outline"
-                        onClick={() => setAddKeyOpen(false)}
-                      >
+                      <Button variant="outline" onClick={() => setAddKeyOpen(false)}>
                         Cancel
                       </Button>
                       <Button onClick={handleAddKey}>Add Key</Button>
@@ -1099,9 +1010,7 @@ export default function ProviderDetailPage() {
                 </Dialog>
               </div>
               <div className="flex items-center gap-2">
-                <Label className="text-xs text-muted-foreground whitespace-nowrap">
-                  Key Strategy
-                </Label>
+                <Label className="text-xs text-muted-foreground whitespace-nowrap">Key Strategy</Label>
                 <select
                   value={connectionStrategy}
                   onChange={(e) => setConnectionStrategy(e.target.value)}
@@ -1130,10 +1039,9 @@ export default function ProviderDetailPage() {
             ) : (
               <div className="space-y-2">
                 {apiKeys.map((key) => {
-                  const isRateLimited =
-                    key.rateLimitedUntil &&
-                    new Date(key.rateLimitedUntil) > new Date();
-                  const isEffectiveDisabled = !key.isActive || !!isRateLimited;
+                  const isRateLimited = key.rateLimitedUntil && new Date(key.rateLimitedUntil) > new Date();
+                  const isDisabledByErrors = key.maxErrors > 0 && key.errorCount >= key.maxErrors;
+                  const isEffectiveDisabled = !key.isActive || isDisabledByErrors || !!isRateLimited;
 
                   return (
                     <div
@@ -1147,30 +1055,22 @@ export default function ProviderDetailPage() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium">
-                              {key.name}
-                            </span>
+                            <span className="text-sm font-medium">{key.name}</span>
                             <Badge variant="outline" className="text-[10px]">
                               P{key.priority}
                             </Badge>
                             {!key.isActive && (
-                              <Badge
-                                variant="secondary"
-                                className="text-[10px]"
-                              >
+                              <Badge variant="secondary" className="text-[10px]">
                                 Disabled
                               </Badge>
                             )}
-                            {key.errorCount > 0 && (
-                              <Badge variant="warning" className="text-[10px]">
-                                {key.errorCount} errors
+                            {isDisabledByErrors && (
+                              <Badge variant="destructive" className="text-[10px]">
+                                {key.errorCount}/{key.maxErrors} errors
                               </Badge>
                             )}
                             {isRateLimited && (
-                              <Badge
-                                variant="destructive"
-                                className="text-[10px]"
-                              >
+                              <Badge variant="destructive" className="text-[10px]">
                                 Rate limited
                               </Badge>
                             )}
@@ -1178,16 +1078,10 @@ export default function ProviderDetailPage() {
                           <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
                             <span>Last error: {key.lastErrorCode || "—"}</span>
                             {key.lastUsedAt && (
-                              <span>
-                                Last used:{" "}
-                                {new Date(key.lastUsedAt).toLocaleString()}
-                              </span>
+                              <span>Last used: {new Date(key.lastUsedAt).toLocaleString()}</span>
                             )}
                             {key.lastErrorAt && (
-                              <span>
-                                Last error:{" "}
-                                {new Date(key.lastErrorAt).toLocaleString()}
-                              </span>
+                              <span>Last error: {new Date(key.lastErrorAt).toLocaleString()}</span>
                             )}
                           </div>
                         </div>
@@ -1197,12 +1091,9 @@ export default function ProviderDetailPage() {
                             onCheckedChange={() => handleToggleKey(key.id)}
                             disabled={keysLoading}
                           />
-                          <Dialog
-                            open={editKeyOpen === key.id}
-                            onOpenChange={(open) => {
-                              if (!open) setEditKeyOpen(null);
-                            }}
-                          >
+                          <Dialog open={editKeyOpen === key.id} onOpenChange={(open) => {
+                            if (!open) setEditKeyOpen(null);
+                          }}>
                             <DialogTrigger>
                               <span
                                 className="inline-flex items-center justify-center h-7 w-7 p-0 rounded-md hover:bg-accent hover:text-accent-foreground cursor-pointer"
@@ -1227,12 +1118,7 @@ export default function ProviderDetailPage() {
                                   <Label>Name</Label>
                                   <Input
                                     value={editKeyForm.name}
-                                    onChange={(e) =>
-                                      setEditKeyForm((f) => ({
-                                        ...f,
-                                        name: e.target.value,
-                                      }))
-                                    }
+                                    onChange={(e) => setEditKeyForm((f) => ({ ...f, name: e.target.value }))}
                                   />
                                 </div>
                                 <div>
@@ -1242,17 +1128,7 @@ export default function ProviderDetailPage() {
                                     min={0}
                                     step={1}
                                     value={editKeyForm.priority}
-                                    onChange={(e) =>
-                                      setEditKeyForm((f) => ({
-                                        ...f,
-                                        priority: Math.max(
-                                          0,
-                                          Math.floor(
-                                            Number(e.target.value) || 0,
-                                          ),
-                                        ),
-                                      }))
-                                    }
+                                    onChange={(e) => setEditKeyForm((f) => ({ ...f, priority: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
                                   />
                                 </div>
                                 <div>
@@ -1262,38 +1138,21 @@ export default function ProviderDetailPage() {
                                     min={1}
                                     step={1}
                                     value={editKeyForm.maxErrors}
-                                    onChange={(e) =>
-                                      setEditKeyForm((f) => ({
-                                        ...f,
-                                        maxErrors: Math.max(
-                                          1,
-                                          Math.floor(
-                                            Number(e.target.value) || 1,
-                                          ),
-                                        ),
-                                      }))
-                                    }
+                                    onChange={(e) => setEditKeyForm((f) => ({ ...f, maxErrors: Math.max(1, Math.floor(Number(e.target.value) || 1)) }))}
                                   />
                                 </div>
                               </div>
                               <DialogFooter>
-                                <Button
-                                  variant="outline"
-                                  onClick={() => setEditKeyOpen(null)}
-                                >
+                                <Button variant="outline" onClick={() => setEditKeyOpen(null)}>
                                   Cancel
                                 </Button>
-                                <Button
-                                  onClick={() => {
-                                    handleUpdateKey(key.id, {
-                                      name: editKeyForm.name,
-                                      priority: editKeyForm.priority,
-                                      maxErrors: editKeyForm.maxErrors,
-                                    });
-                                  }}
-                                >
-                                  Save
-                                </Button>
+                                <Button onClick={() => {
+                                  handleUpdateKey(key.id, {
+                                    name: editKeyForm.name,
+                                    priority: editKeyForm.priority,
+                                    maxErrors: editKeyForm.maxErrors,
+                                  });
+                                }}>Save</Button>
                               </DialogFooter>
                             </DialogContent>
                           </Dialog>
@@ -1395,7 +1254,7 @@ export default function ProviderDetailPage() {
           <CardContent className="space-y-4">
             {/* Search + Add model */}
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-50 max-w-md">
+              <div className="relative flex-1 min-w-[200px] max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                 <Input
                   placeholder="Search models..."
@@ -1466,8 +1325,8 @@ export default function ProviderDetailPage() {
                           health?.status === "healthy"
                             ? "border-green-300 dark:border-green-800 bg-green-50/30 dark:bg-green-950/10"
                             : health?.status === "unhealthy"
-                              ? "border-red-300 dark:border-red-800 bg-red-50/30 dark:bg-red-950/10"
-                              : ""
+                            ? "border-red-300 dark:border-red-800 bg-red-50/30 dark:bg-red-950/10"
+                            : ""
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -1605,10 +1464,7 @@ export default function ProviderDetailPage() {
                     setName(provider.name);
                     setPrefix(provider.prefix);
                     setBaseUrl(provider.baseUrl);
-                    setConnectionStrategy(
-                      ((provider as unknown as Record<string, unknown>)
-                        .connectionStrategy as string) ?? "priority",
-                    );
+                    setConnectionStrategy((provider as unknown as Record<string, unknown>).connectionStrategy as string ?? "priority");
                     setApiKey("");
                     setModelList(provider.models);
                   }
@@ -1658,25 +1514,6 @@ export default function ProviderDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* OAuth Flow Modal for OAuth-based providers */}
-      {provider && (
-        <OAuthFlowModal
-          open={oauthFlowOpen}
-          onOpenChange={setOauthFlowOpen}
-          provider={
-            provider.format === "gemini-cli"
-              ? "gemini-cli"
-              : provider.format === "anthropic"
-                ? "claude"
-                : "codex"
-          }
-          onSuccess={() => {
-            fetchApiKeys();
-            toast.success("OAuth connection added!");
-          }}
-        />
-      )}
     </div>
   );
 }

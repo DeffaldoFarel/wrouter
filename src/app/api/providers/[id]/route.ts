@@ -4,7 +4,7 @@ import { providers, providerConnections, requestLogs } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import { checkDashboardAuth } from "@/lib/auth/session";
 import { validateProviderUpdate } from "@/lib/validation";
-// API keys stored plaintext — matches 9router upstream.
+import { encrypt, isEncrypted, safeDecryptApiKey } from "@/lib/crypto";
 import { validateUrl } from "@/lib/ssrf-guard";
 import { invalidateProviderCache } from "@/lib/router/engine";
 import { maskApiKey } from "@/lib/utils/mask-key";
@@ -28,7 +28,7 @@ export async function GET(
   return NextResponse.json({
     ...provider,
     models: JSON.parse(provider.models),
-    apiKey: provider.apiKey ? maskApiKey(provider.apiKey) : null,
+    apiKey: provider.apiKey ? maskApiKey(safeDecryptApiKey(provider.apiKey)) : null,
   });
 }
 
@@ -65,9 +65,9 @@ export async function PUT(
   };
 
   // Validate format if provided
-  if (format !== undefined && !["openai", "anthropic", "gemini", "gemini-cli"].includes(format)) {
+  if (format !== undefined && !["openai", "anthropic", "gemini"].includes(format)) {
     return NextResponse.json(
-      { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', 'gemini', or 'gemini-cli'.` },
+      { error: `Invalid format: ${format}. Must be 'openai', 'anthropic', or 'gemini'.` },
       { status: 400 }
     );
   }
@@ -107,7 +107,7 @@ export async function PUT(
     name: name ?? existing.name,
     prefix: prefix ?? existing.prefix,
     baseUrl: baseUrl ? baseUrl.replace(/\/$/, "") : existing.baseUrl,
-    apiKey: apiKey ?? existing.apiKey ?? null,
+    apiKey: apiKey ? (isEncrypted(apiKey) ? apiKey : encrypt(apiKey)) : existing.apiKey,
     models: models ? JSON.stringify(models) : existing.models,
     enabled: enabled !== undefined ? enabled : existing.enabled,
     type: type ?? existing.type,
@@ -126,13 +126,13 @@ export async function PUT(
       .where(and(eq(providerConnections.providerId, id), eq(providerConnections.authType, "apikey")))
       .get();
 
-    const plainKey = apiKey;
+    const encryptedKey = isEncrypted(apiKey) ? apiKey : encrypt(apiKey);
 
     if (existingConn) {
       // Update existing connection
       db.update(providerConnections)
         .set({
-          data: JSON.stringify({ apiKey: plainKey }),
+          data: JSON.stringify({ apiKey: encryptedKey }),
           updatedAt: new Date().toISOString(),
         })
         .where(eq(providerConnections.id, existingConn.id))
@@ -147,7 +147,7 @@ export async function PUT(
         name: "Primary Key",
         priority: 0,
         isActive: true,
-        data: JSON.stringify({ apiKey: plainKey }),
+        data: JSON.stringify({ apiKey: encryptedKey }),
         maxErrors: 5,
         currentUsage: 0,
         errorCount: 0,
@@ -163,7 +163,7 @@ export async function PUT(
     id,
     ...updated,
     models: JSON.parse(updated.models),
-    apiKey: updated.apiKey ? maskApiKey(updated.apiKey) : null,
+    apiKey: updated.apiKey ? maskApiKey(safeDecryptApiKey(updated.apiKey)) : null,
   });
 }
 
