@@ -22,8 +22,13 @@ const DB_PATH = path.join(DATA_DIR, "wrouter.db");
 
 const sqlite = new Database(DB_PATH);
 
-// Enable WAL mode for better performance
+// WAL mode allows concurrent readers + 1 writer without blocking.
 sqlite.pragma("journal_mode = WAL");
+
+// busy_timeout: when the DB is locked, SQLite retries for up to 5 seconds
+// before throwing "database is locked". Essential for concurrent access
+// (e.g., dev server hot reload + API requests + background operations).
+sqlite.pragma("busy_timeout = 5000");
 
 export const db = drizzle(sqlite, { schema });
 
