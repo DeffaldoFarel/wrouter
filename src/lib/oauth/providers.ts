@@ -485,7 +485,7 @@ const geminiProvider: ProviderHandler = {
   config: GEMINI_CONFIG,
   flowType: "authorization_code",
 
-  buildAuthUrl(config, redirectUri, state) {
+  buildAuthUrl(config, redirectUri, state, codeChallenge) {
     const params = new URLSearchParams({
       client_id: config.clientId,
       redirect_uri: redirectUri,
@@ -495,10 +495,15 @@ const geminiProvider: ProviderHandler = {
       access_type: "offline",
       prompt: "consent",
     });
+    // Add PKCE code_challenge if provided (Google supports PKCE S256)
+    if (codeChallenge) {
+      params.set("code_challenge", codeChallenge);
+      params.set("code_challenge_method", "S256");
+    }
     return `${config.authorizationEndpoint}?${params.toString()}`;
   },
 
-  async exchangeToken(config, code, redirectUri) {
+  async exchangeToken(config, code, redirectUri, codeVerifier) {
     const body = new URLSearchParams({
       grant_type: "authorization_code",
       client_id: config.clientId,
@@ -506,6 +511,10 @@ const geminiProvider: ProviderHandler = {
       code,
       redirect_uri: redirectUri,
     });
+    // Add PKCE code_verifier if provided (must match code_challenge sent in auth URL)
+    if (codeVerifier) {
+      body.set("code_verifier", codeVerifier);
+    }
 
     const response = await fetch(config.tokenEndpoint, {
       method: "POST",
