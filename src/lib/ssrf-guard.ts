@@ -9,6 +9,34 @@ export interface ValidationResult {
 const BLOCKED_HOSTNAMES = ["localhost"];
 const BLOCKED_SUFFIXES = [".localhost", ".local", ".internal"];
 
+// ─── DNS Cache ───
+// Cache DNS lookups to avoid repeated lookups for the same hostname.
+// Provider URLs rarely change, so a 5-minute TTL is safe.
+interface DnsCacheEntry {
+  addresses: dns.LookupAddress[];
+  timestamp: number;
+}
+
+const dnsCache = new Map<string, DnsCacheEntry>();
+const DNS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getDnsCache(hostname: string): dns.LookupAddress[] | null {
+  const entry = dnsCache.get(hostname);
+  if (!entry) return null;
+  
+  const age = Date.now() - entry.timestamp;
+  if (age > DNS_CACHE_TTL) {
+    dnsCache.delete(hostname);
+    return null;
+  }
+  
+  return entry.addresses;
+}
+
+function setDnsCache(hostname: string, addresses: dns.LookupAddress[]): void {
+  dnsCache.set(hostname, { addresses, timestamp: Date.now() });
+}
+
 /**
  * Check if a hostname matches blocked patterns:
  * localhost, *.localhost, *.local, *.internal
@@ -138,18 +166,25 @@ export async function validateUrl(urlString: string): Promise<ValidationResult> 
     return { valid: true };
   }
 
-  // 4b. Resolve DNS and check every returned address
-  let addresses: dns.LookupAddress[];
-  try {
-    addresses = await dns.promises.lookup(hostname, { all: true });
-  } catch (err) {
-    return {
-      valid: false,
-      error: `DNS resolution failed for "${hostname}": ${err instanceof Error ? err.message : "unknown error"}`,
-    };
+  // 4b. Resolve DNS and check every returned address (with cache)
+  let addresses: dns.LookupAddress[] | null = getDnsCache(hostname);
+  
+  if (!addresses) {
+    // Cache miss — do DNS lookup
+    try {
+      addresses = await dns.promises.lookup(hostname, { all: true });
+      if (addresses) {
+        setDnsCache(hostname, addresses);
+      }
+    } catch (err) {
+      return {
+        valid: false,
+        error: `DNS resolution failed for "${hostname}": ${err instanceof Error ? err.message : "unknown error"}`,
+      };
+    }
   }
 
-  if (!addresses.length) {
+  if (!addresses || !addresses.length) {
     return { valid: false, error: `No DNS records found for "${hostname}".` };
   }
 

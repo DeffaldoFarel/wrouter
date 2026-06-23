@@ -1023,20 +1023,14 @@ export default function UsagePage() {
 
   const PAGE_SIZE = 20;
 
+  // ─── fetchAll: fetches data for a given filter ───
+  // Uses staggered loading: critical data first, then non-critical
   const fetchAll = useCallback(async (f: string) => {
+    setLoading(true);
+    
     try {
-      const [ur, lr, pr, cr] = await Promise.all([
-        fetch(`/api/usage?filter=${f}`),
-        fetch(`/api/logs?limit=${PAGE_SIZE}`),
-        fetch("/api/providers"),
-        fetch("/api/stats/costs"),
-      ]);
-      if (ur.ok) setUsage(await ur.json());
-      if (lr.ok) {
-        const lrData = await lr.json();
-        setLogs(lrData.logs);
-        setLogsTotal(lrData.total ?? lrData.logs.length);
-      }
+      // Phase 1: Fetch critical data (providers - needed for rendering)
+      const pr = await fetch("/api/providers");
       if (pr.ok) {
         const providers = await pr.json();
         const byId: Record<string, ProviderInfo> = {};
@@ -1044,6 +1038,20 @@ export default function UsagePage() {
           byId[p.id] = { id: p.id, prefix: p.prefix };
         }
         setProvidersById(byId);
+      }
+      
+      // Phase 2: Fetch remaining data in parallel (usage, logs, costs)
+      const [ur, lr, cr] = await Promise.all([
+        fetch(`/api/usage?filter=${f}`),
+        fetch(`/api/logs?limit=${PAGE_SIZE}`),
+        fetch("/api/stats/costs"),
+      ]);
+      
+      if (ur.ok) setUsage(await ur.json());
+      if (lr.ok) {
+        const lrData = await lr.json();
+        setLogs(lrData.logs);
+        setLogsTotal(lrData.total ?? lrData.logs.length);
       }
       if (cr.ok) setCostData(await cr.json());
     } catch {
@@ -1081,7 +1089,7 @@ export default function UsagePage() {
     }
   }, [loadingMore, logsTotal]);
 
-  // SSE connection
+  // SSE connection — stable, NO dependency on fetchAll to prevent reconnect loops
   useEffect(() => {
     let es: EventSource;
     let retries = 0;
@@ -1144,8 +1152,10 @@ export default function UsagePage() {
             setLogs([]);
             setLogsTotal(0);
             setUsage(null);
-            // Direct refetch — setFilter(cur => cur) is a no-op in React when value is unchanged
-            fetchAll(filter);
+            // Use current filter value directly (not from state) to avoid stale closure
+            fetchAll(window.location.search.includes("filter=") 
+              ? new URLSearchParams(window.location.search).get("filter") || "24h" 
+              : "24h");
           }
         } catch {
           /* ignore */
@@ -1171,10 +1181,11 @@ export default function UsagePage() {
       }
       activeTimeoutsRef.current.clear();
     };
-  }, [fetchAll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps — SSE connects once on mount, never reconnects due to fetchAll changes
 
+  // Initial load + filter change
   useEffect(() => {
-    setLoading(true);
     fetchAll(filter);
   }, [filter, fetchAll]);
 

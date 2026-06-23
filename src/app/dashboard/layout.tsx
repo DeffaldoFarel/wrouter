@@ -425,17 +425,24 @@ export default function DashboardLayout({
     }
   }, []);
 
-  // Auth check
+  // Auth check with timeout to prevent infinite skeleton
   useEffect(() => {
-    fetch("/api/auth/check")
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+    fetch("/api/auth/check", { signal: controller.signal })
       .then((res) => {
+        clearTimeout(timeout);
         if (!res.ok) {
           router.push("/login");
         } else {
           setAuthenticated(true);
         }
       })
-      .catch(() => router.push("/login"))
+      .catch(() => {
+        clearTimeout(timeout);
+        router.push("/login");
+      })
       .finally(() => setLoading(false));
   }, [router]);
 

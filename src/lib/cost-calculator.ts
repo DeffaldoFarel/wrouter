@@ -202,14 +202,33 @@ const PATTERN_PRICING: PatternEntry[] = [
 // ─── Pattern Matching ───
 
 /**
- * Match a model against a glob pattern. Supports * as wildcard.
+ * Convert a glob pattern to a RegExp. Supports * as wildcard.
  * Case-insensitive.
  */
-function matchPattern(pattern: string, model: string): boolean {
-  const regex = new RegExp(
+function globToRegex(pattern: string): RegExp {
+  return new RegExp(
     "^" + pattern.split("*").map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$",
     "i"
   );
+}
+
+// Pre-compile all pattern regexes at module load time (avoids recompilation on every lookup)
+interface CompiledPatternEntry {
+  pattern: string;
+  regex: RegExp;
+  pricing: ModelPricing;
+}
+
+const COMPILED_PATTERN_PRICING: CompiledPatternEntry[] = PATTERN_PRICING.map(entry => ({
+  ...entry,
+  regex: globToRegex(entry.pattern),
+}));
+
+/**
+ * Match a model against a glob pattern. Supports * as wildcard.
+ * Case-insensitive. Uses pre-compiled regex.
+ */
+function matchPattern(regex: RegExp, model: string): boolean {
   return regex.test(model);
 }
 
@@ -239,9 +258,9 @@ export function getPricingForModel(model: string, provider?: string): ModelPrici
   if (MODEL_PRICING[baseModel]) return MODEL_PRICING[baseModel];
   if (MODEL_PRICING[model]) return MODEL_PRICING[model];
 
-  // 3. Pattern fallback (first match wins)
-  for (const { pattern, pricing } of PATTERN_PRICING) {
-    if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) {
+  // 3. Pattern fallback (first match wins) — uses pre-compiled regexes
+  for (const { regex, pricing } of COMPILED_PATTERN_PRICING) {
+    if (matchPattern(regex, baseModel) || matchPattern(regex, model)) {
       return pricing;
     }
   }

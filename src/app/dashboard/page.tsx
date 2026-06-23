@@ -293,16 +293,22 @@ export default function DashboardPage() {
   }
 
   async function fetchAll() {
+    // Staggered loading: fetch critical data first, then non-critical
+    setLoading(true);
+    
     try {
-      const [settingsData, keysData, providersData, combosData, usageData] =
-        await Promise.all([
-          fetch("/api/settings").then((r) => r.json()),
-          fetch("/api/keys").then((r) => r.json()),
-          fetch("/api/providers").then((r) => r.json()),
-          fetch("/api/combos").then((r) => r.json()),
-          fetch("/api/usage?filter=today").then((r) => r.json()),
-        ]);
+      // Phase 1: Fetch critical data (settings, keys, providers) - needed for page rendering
+      const [settingsRes, keysRes, providersRes] = await Promise.all([
+        fetch("/api/settings"),
+        fetch("/api/keys"),
+        fetch("/api/providers"),
+      ]);
 
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const keysData = keysRes.ok ? await keysRes.json() : [];
+      const providersData = providersRes.ok ? await providersRes.json() : [];
+
+      // Set critical data immediately - page becomes visible
       if (settingsData && typeof settingsData === "object") {
         setSettings(settingsData);
       }
@@ -314,11 +320,20 @@ export default function DashboardPage() {
         }
       }
       if (Array.isArray(providersData)) setProviders(providersData);
+      
+      // Mark as not loading after critical data is ready
+      setLoading(false);
+
+      // Phase 2: Fetch non-critical data (combos, usage) in background
+      const [combosData, usageData] = await Promise.all([
+        fetch("/api/combos").then((r) => r.ok ? r.json() : []),
+        fetch("/api/usage?filter=today").then((r) => r.ok ? r.json() : null),
+      ]);
+
       if (Array.isArray(combosData)) setCombos(combosData);
       if (usageData?.summary) setUsage(usageData.summary);
     } catch {
       toast.error("Failed to load dashboard data");
-    } finally {
       setLoading(false);
     }
   }

@@ -4,7 +4,7 @@ import * as schema from "./schema";
 import path from "path";
 import fs from "fs";
 import bcrypt from "bcryptjs";
-import { randomInt } from "crypto";
+import { randomBytes } from "crypto";
 
 // Bootstrap secrets on first boot (generate random JWT_SECRET if not set)
 // Must run before any module that depends on JWT_SECRET loads.
@@ -179,12 +179,10 @@ export function initializeDatabase() {
 }
 
 export function generateApiKey(): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "wkz-";
-  for (let i = 0; i < 32; i++) {
-    result += chars.charAt(randomInt(chars.length));
-  }
-  return result;
+  // Generate 32 random alphanumeric characters using crypto.randomBytes
+  // More efficient and cryptographically stronger than character-by-character randomInt
+  const bytes = randomBytes(24); // 24 bytes = 192 bits = ~32 base36 chars
+  return "wkz-" + bytes.toString("base64url").slice(0, 32);
 }
 
 // Initialize on first import

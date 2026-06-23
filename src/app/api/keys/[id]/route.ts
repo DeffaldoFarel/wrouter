@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { apiKeys } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { checkDashboardAuth } from "@/lib/auth/session";
+import { checkDashboardAuth, invalidateApiKeyCache } from "@/lib/auth/session";
+import { invalidateCache } from "@/lib/api-cache";
 
 export async function PUT(
   req: NextRequest,
@@ -29,6 +30,10 @@ export async function PUT(
 
   db.update(apiKeys).set(updated).where(eq(apiKeys.id, id)).run();
 
+  // Invalidate server-side and client-side caches
+  if (existing.key) invalidateApiKeyCache(existing.key);
+  invalidateCache("/api/keys");
+
   return NextResponse.json({ 
     ...existing, 
     ...updated,
@@ -51,6 +56,10 @@ export async function DELETE(
   }
 
   db.delete(apiKeys).where(eq(apiKeys.id, id)).run();
+
+  // Invalidate server-side and client-side caches
+  if (existing.key) invalidateApiKeyCache(existing.key);
+  invalidateCache("/api/keys");
 
   return NextResponse.json({ success: true });
 }

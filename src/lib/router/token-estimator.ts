@@ -13,6 +13,24 @@
 import { encode } from "gpt-tokenizer";
 import logger from "@/lib/logger";
 
+// ─── Role encoding cache ───
+// Common roles are encoded repeatedly; cache the results to avoid redundant encode() calls.
+const roleCache = new Map<string, number>();
+
+function getCachedRoleLength(role: string): number {
+  const cached = roleCache.get(role);
+  if (cached !== undefined) return cached;
+  
+  const length = encode(role).length;
+  roleCache.set(role, length);
+  return length;
+}
+
+// ─── Content-to-string cache ───
+// Short strings that appear frequently can be cached.
+const contentCache = new Map<string, string>();
+const CONTENT_CACHE_MAX = 1000; // LRU-style limit
+
 export interface MessageLike {
   role: string;
   content: string | unknown;
@@ -64,9 +82,9 @@ export function estimateInputTokens(messages: MessageLike[]): number {
       const text = contentToString(msg.content);
       // 4 tokens per message for chat-format overhead (role, separators)
       total += 4 + encode(text).length;
-      // Role itself adds ~1 token
+      // Role itself adds ~1 token — use cached result
       if (typeof msg.role === "string") {
-        total += encode(msg.role).length;
+        total += getCachedRoleLength(msg.role);
       }
     } catch (err) {
       logger.warn({ err }, "estimateInputTokens: failed to encode message, skipping");

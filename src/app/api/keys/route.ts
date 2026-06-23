@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, generateApiKey } from "@/lib/db";
 import { apiKeys } from "@/lib/db/schema";
 import { v4 as uuidv4 } from "uuid";
-import { checkDashboardAuth } from "@/lib/auth/session";
+import { checkDashboardAuth, invalidateApiKeyCache } from "@/lib/auth/session";
 import { validateApiKey } from "@/lib/validation";
+import { invalidateCache } from "@/lib/api-cache";
 
 export async function GET(req: NextRequest) {
   if (!checkDashboardAuth(req)) {
@@ -58,6 +59,9 @@ export async function POST(req: NextRequest) {
     };
 
     db.insert(apiKeys).values(newKey).run();
+
+    // Invalidate client-side cache
+    invalidateCache("/api/keys");
 
     return NextResponse.json({
       ...newKey,
