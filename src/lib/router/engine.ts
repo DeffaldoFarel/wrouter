@@ -2,7 +2,7 @@ import { db } from "../db";
 import { providers, combos, requestLogs, apiKeys } from "../db/schema";
 import { eq, inArray } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { safeDecryptApiKey } from "../crypto";
+
 import { calculateSimpleCost } from "../cost-calculator";
 import logger from "@/lib/logger";
 import { pickConnection, pickFallback, recordError } from "../key-picker";
@@ -124,7 +124,7 @@ function resolveProviderKey(
 
   // Fallback to provider-level single key (backward compatibility)
   if (provider.apiKey) {
-    return { apiKey: safeDecryptApiKey(provider.apiKey), connectionId: null };
+    return { apiKey: provider.apiKey, connectionId: null };
   }
 
   return null;
@@ -193,7 +193,7 @@ function buildAllRoutingResults(
       providerId: provider.id,
       providerName: provider.name,
       baseUrl: provider.baseUrl,
-      apiKey: safeDecryptApiKey(provider.apiKey),
+      apiKey: provider.apiKey,
       format: (provider as { format?: string }).format ?? "openai",
       model: modelName,
       connectionId: null,

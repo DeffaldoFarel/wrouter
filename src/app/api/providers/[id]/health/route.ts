@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { providers, providerConnections } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { checkDashboardAuth } from "@/lib/auth/session";
-import { safeDecryptApiKey } from "@/lib/crypto";
+
 import { validateUrl } from "@/lib/ssrf-guard";
 import { dashboardLimiter, getClientIp, rateLimitResponse } from "@/lib/rate-limit";
 
@@ -60,12 +60,12 @@ export async function GET(
       if (conn?.data) {
         try {
           const data = JSON.parse(conn.data);
-          if (data.apiKey) resolvedApiKey = safeDecryptApiKey(data.apiKey);
+          if (data.apiKey) resolvedApiKey = data.apiKey;
         } catch (e) {
           console.warn("[health] Failed to parse connection data:", e);
         }
       }
-      if (!resolvedApiKey && provider.apiKey) resolvedApiKey = safeDecryptApiKey(provider.apiKey);
+      if (!resolvedApiKey && provider.apiKey) resolvedApiKey = provider.apiKey;
 
       if (!resolvedApiKey) {
         return NextResponse.json({

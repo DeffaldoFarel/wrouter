@@ -14,6 +14,7 @@ import { validateUrl } from "@/lib/ssrf-guard";
 // Re-export so existing call sites in route.ts keep working
 export type { ChatCompletionRequest };
 
+
 /**
  * Check if a URL is an OpenRouter endpoint.
  */
@@ -358,14 +359,12 @@ async function forwardRequest(
 
   // Fallback to raw fetch
   const isAnthropic = target.format === "anthropic";
-  const url = isAnthropic
-    ? `${target.baseUrl.replace(/\/$/, "")}/messages`
-    : `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
-
+  let url: string;
   let forwardBody: unknown;
   let headers: Record<string, string>;
 
   if (isAnthropic) {
+    url = `${target.baseUrl.replace(/\/$/, "")}/messages`;
     const anthropicReq = openaiToAnthropicRequest({
       ...requestBody,
       model: target.model,
@@ -377,6 +376,7 @@ async function forwardRequest(
       "anthropic-version": "2023-06-01",
     };
   } else {
+    url = `${target.baseUrl.replace(/\/$/, "")}/chat/completions`;
     // Build the forwarded body with the resolved model + OpenRouter provider injection
     const injected = injectOpenRouterProvider(requestBody, target);
     forwardBody = {
@@ -440,7 +440,6 @@ export async function proxyStreamWithFallback(
       // Raw fetch path
       const isAnthropic = target.format === "anthropic";
       const isGemini = target.baseUrl.includes("generativelanguage.googleapis.com");
-
       let url: string;
       if (isAnthropic) {
         url = `${target.baseUrl.replace(/\/$/, "")}/messages`;

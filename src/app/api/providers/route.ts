@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { checkDashboardAuth } from "@/lib/auth/session";
 import { validateUrl } from "@/lib/ssrf-guard";
-import { encrypt, safeDecryptApiKey } from "@/lib/crypto";
+
 import { validateProvider } from "@/lib/validation";
 import { invalidateProviderCache } from "@/lib/router/engine";
 import { maskApiKey } from "@/lib/utils/mask-key";
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   const result = allProviders.map((p) => ({
     ...p,
     models: JSON.parse(p.models),
-    apiKey: p.apiKey ? maskApiKey(safeDecryptApiKey(p.apiKey)) : null,
+    apiKey: p.apiKey ? maskApiKey(p.apiKey) : null,
   }));
 
   return NextResponse.json(result);
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       name,
       prefix,
       baseUrl: baseUrl.replace(/\/$/, ""),
-      apiKey: apiKey ? encrypt(apiKey) : null,
+      apiKey: apiKey || null,
       models: JSON.stringify([]),
       enabled: true,
       type,
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
         name: "Primary Key",
         priority: 0,
         isActive: true,
-        data: JSON.stringify({ apiKey: encrypt(apiKey) }),
+        data: JSON.stringify({ apiKey }),
         maxErrors: 5,
         currentUsage: 0,
         errorCount: 0,

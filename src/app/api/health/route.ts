@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { providers } from "@/lib/db/schema";
 import { checkDashboardAuth } from "@/lib/auth/session";
-import { safeDecryptApiKey } from "@/lib/crypto";
+
 import { validateUrl } from "@/lib/ssrf-guard";
 
 export async function GET(req: NextRequest) {
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
         const res = await fetch(`${p.baseUrl}/models`, {
           method: "GET",
           headers: {
-            Authorization: `Bearer ${safeDecryptApiKey(p.apiKey)}`,
+            Authorization: `Bearer ${p.apiKey}`,
             "Content-Type": "application/json",
           },
           signal: AbortSignal.timeout(8000),

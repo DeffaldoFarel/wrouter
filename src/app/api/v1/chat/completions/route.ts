@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
     const fallbackChain = getFallbackChain(model!);
 
     if (fallbackChain.length === 0) {
-      // Try direct model resolution
+      // Try direct model resolution (sync)
       const direct = resolveModel(model!);
       if (direct) {
         fallbackChain.push(direct);

@@ -1197,6 +1197,7 @@ export default function DashboardPage() {
                   No active providers. Enable providers first to see available models.
                 </p>
               )}
+
               {combos.filter((c) => c.enabled).length > 0 && (
                 <div className="space-y-1 border-t pt-3 mt-3">
                   <div className="text-xs font-semibold text-primary uppercase tracking-wide">

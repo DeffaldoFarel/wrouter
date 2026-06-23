@@ -13,8 +13,7 @@
 import { db } from "./db";
 import { providerConnections, providers } from "./db/schema";
 import { eq, and, isNull, lte, lt, or, asc, sql, notInArray } from "drizzle-orm";
-import { safeDecryptApiKey } from "./crypto";
-import { encrypt } from "./crypto";
+
 import { v4 as uuidv4 } from "uuid";
 
 // Maximum retry attempts when fallback to next key
@@ -173,12 +172,10 @@ export function pickConnection(
 
   // Extract API key from the data JSON blob
   const data = JSON.parse(selected.data || "{}");
-  const encryptedKey = data.apiKey as string | undefined;
-  if (!encryptedKey) {
-    return { key: null, connectionId: null, reason: "Connection has no API key" };
-  }
-
-  const apiKey = safeDecryptApiKey(encryptedKey);
+  const apiKey = data.apiKey as string | undefined;
+    if (!apiKey) {
+      return { key: null, connectionId: null, reason: "Connection has no API key" };
+    }
 
   // Record usage
   recordUsage(selected.id);
@@ -318,12 +315,10 @@ export function pickFallback(
   }
 
   const data = JSON.parse(selected.data || "{}");
-  const encryptedKey = data.apiKey as string | undefined;
-  if (!encryptedKey) {
-    return { key: null, connectionId: null, reason: "Fallback connection has no API key" };
-  }
-
-  const apiKey = safeDecryptApiKey(encryptedKey);
+  const apiKey = data.apiKey as string | undefined;
+    if (!apiKey) {
+      return { key: null, connectionId: null, reason: "Fallback connection has no API key" };
+    }
   recordUsage(selected.id);
 
   return {
@@ -423,7 +418,7 @@ export function createApiKeyConnection(input: CreateApiKeyConnectionInput): type
     lastUsedAt: null,
     rateLimitedUntil: null,
     maxErrors: input.maxErrors ?? 5,
-    data: JSON.stringify({ apiKey: encrypt(input.apiKey) }),
+    data: JSON.stringify({ apiKey: input.apiKey }),
     createdAt: now,
     updatedAt: now,
   };
@@ -510,7 +505,7 @@ export function updateApiKeyConnection(
   if (updates.maxErrors !== undefined) dbUpdates.maxErrors = updates.maxErrors;
   if (updates.apiKey !== undefined) {
     const data = JSON.parse(conn.data || "{}");
-    data.apiKey = encrypt(updates.apiKey);
+    data.apiKey = updates.apiKey;
     dbUpdates.data = JSON.stringify(data);
   }
 
